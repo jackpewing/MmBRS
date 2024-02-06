@@ -1,0 +1,112 @@
+---
+title: "PI Timeseries plot"
+author: "Jack Ewing"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+
+```
+
+Part 1: load data
+
+```{r}
+setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/5km_mask/daily")
+data = read.csv("dailybinned_20240131_UTC.csv")
+```
+
+Prepare data
+```{r}
+# Assuming your data frame is named 'data' and it has columns 'Time', 'Ice_pc', 'MmPres_eff_adj', 'sPres'
+# Ensure 'Time' is in Date format
+data$Time <- as.Date(data$Time, format = "%d-%b-%Y")
+
+# Get the unique years
+years <- unique(data$year)
+
+
+```
+
+plot data
+```{r}
+
+library(scales)  # Load the scales package for date formatting
+
+for (y in years) {
+    yearly_data <- subset(data, year == y)
+
+    # Ensure data is sorted
+    yearly_data <- yearly_data[order(yearly_data$Time), ]
+
+    # Plotting
+    gg <- ggplot(yearly_data, aes(x = Time)) +
+        geom_line(aes(y = Ice_pc, group = 1), color = "blue") +
+        geom_line(aes(y = MmPres_eff_adj * 100 / 1400, group = 1), color = "black") +
+        geom_bar(aes(y = sPres * 100 / 1400), stat = "identity", fill = "red", position = "dodge") +
+        scale_y_continuous("Percent Ice Cover", 
+                           sec.axis = sec_axis(~ . * 1400 / 100, name = "Presence (mins/day)")) +
+        scale_x_date(date_breaks = "1 month", date_labels = "%b") +  # Monthly breaks with month names
+        labs(x = "Date", y = "Percent Ice Cover / Normalized Presence") +
+        theme_minimal()
+
+    # Print the plot
+    print(gg)
+}
+
+
+```
+
+
+
+Gray out non effort periods?
+
+```{r}
+for (y in years) {
+    yearly_data <- subset(data, year == y)
+
+    # Ensure Time is a Date object
+    yearly_data$Time <- as.Date(yearly_data$Time)
+
+    # Ensure data is sorted
+    yearly_data <- yearly_data[order(yearly_data$Time), ]
+
+    # Identify missing dates
+    all_dates <- seq.Date(min(yearly_data$Time), max(yearly_data$Time), by = "day")
+    missing_dates <- setdiff(all_dates, yearly_data$Time)
+
+    # Create data frame for missing periods (start and end of each missing period)
+    if (length(missing_dates) > 0) {
+        missing_periods <- data.frame(start = c(missing_dates[1], missing_dates[which(diff(missing_dates) != 1) + 1]),
+                                      end = c(missing_dates[which(diff(missing_dates) != 1)], tail(missing_dates, 1)))
+        missing_periods$start <- as.Date(missing_periods$start)
+        missing_periods$end <- as.Date(missing_periods$end)
+    } else {
+        missing_periods <- data.frame(start = as.Date(character()), end = as.Date(character()))
+    }
+
+    # Plotting
+    gg <- ggplot(yearly_data, aes(x = Time)) +
+        geom_rect(data = missing_periods, aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf), fill = "gray", alpha = 0.5) +
+        geom_line(aes(y = Ice_pc, group = 1), color = "blue") +
+        geom_line(aes(y = MmPres_eff_adj * 100 / 1400, group = 1), color = "black") +
+        geom_bar(aes(y = sPres * 100 / 1400), stat = "identity", fill = "red", position = "dodge") +
+        scale_y_continuous("Percent Ice Cover", 
+                           sec.axis = sec_axis(~ . * 1400 / 100, name = "Presence (mins/day)")) +
+        scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+        labs(x = "Date", y = "Percent Ice Cover / Normalized Presence") +
+        theme_minimal()
+
+    # Print the plot
+    print(gg)
+}
+
+```
+
+
+
+
