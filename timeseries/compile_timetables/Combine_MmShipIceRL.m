@@ -12,7 +12,7 @@ RLPath = [DBPath,'output\ssLTSA_data\all_RL'];
 ShipPath = [DBPath,'output\GetShip_Timetable\All_Events_40km'];
 
 %save path
-outDir = [DBPath,'output\Stage_two\Combine_all'];
+outDir = [DBPath,'output\Stage_two\Combine_all\publication\10km_mask\effort'];
 
 % Turn times with no effort into Nan's for related columns?
 nanEff = 0; % 0 = no, 1 = yes
@@ -39,6 +39,7 @@ RLData = fullfile(RL_paths(1,:), RL_files(1,:));
 [Ship_files, Ship_paths] = uigetfile([ShipPath,'\*.mat'],'MultiSelect','on',...
         ['Select Ship Data']);
 ShipData = fullfile(Ship_paths(1,:), Ship_files(1,:));
+
 
 % Load it up
 load(MmData)
@@ -93,6 +94,7 @@ MostData.draft_m = newShipTT.draft_m;
 MostData.aspect = newShipTT.aspect;
 MostData.n_ships = newShipTT.n_ships;
 MostData.shipType = newShipTT.shipType;
+
 
 %Change ship types to their actual names
 
@@ -312,15 +314,22 @@ MostData.shipType = []; %% IDK where the second one came from but abort
 idx = find(any(ismissing(MostData),2));
 MostData(idx,:) = [];
     
+%last minute add normalized time of day (because there are nans in it)
+
+% add normalized time of day now as well! (just for october as of now)
+load('G:\Shared drives\SWAL_Arctic\Research_projects\JackBRS\Arctic_shiptxClicks\output\Solar\publication\oct_normtod_PI_1min.mat');
+MostData.tod = TT1.tod(1:end-1);
+
+
 %%%% SAVE DATA %%%%
 
 data = MostData;
 
 %save('E:\Shared drives\SWAL_Arctic\Research_projects\JackBRS\Arctic_shiptxClicks\output\Combine_all\All_MmShipIceRL.mat', 'All_MmShipIceRL_nans');
 % below not fucking working for some reason
-save(fullfile(outDir, 'Binned_data_MmBRS_20240131'), 'data')
+save(fullfile(outDir, 'effortBinned_data_MmBRS_UTC'), 'data')
 
-filename = 'Binned_data_MmBRS_20240131.csv';
+filename = 'effortBinned_data_MmBRS_UTC.csv';
 writetable(data, fullfile(outDir, filename));
 
 

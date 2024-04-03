@@ -1,4 +1,4 @@
-### Fall Minute Model
+### Daily Model
 
 # Using Generalized Estimating Equations (GEEs) to quantify 
 # narwhal behavioral response to shipping in Eclipse Sound
@@ -15,7 +15,7 @@ library (geepack)
 library(MuMIn)
 library(dplyr)
 library(gt)
-library(lubridate)
+library(tidyr)
 #source('C:/Users/Alba/Documents/GitHub/SOCAL_Sonar_Impact/publication/plotKernelDensityDistr.R')
 source('C:/Users/HARP/Documents/GitHub/SOCAL_Sonar_Impact/publication/getPvalues.R')
 source('C:/Users/HARP/Documents/GitHub/SOCAL_Sonar_Impact/publication/new_plot_code/myviolin.R')
@@ -27,9 +27,17 @@ source('C:/Users/HARP/Documents/GitHub/SOCAL_Sonar_Impact/publication/new_plot_c
 
 ## Load Data
 
-setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/stage_two/Combine_all/publication/5km_mask/effort")
+setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/stage_two/Combine_all/publication/20km_mask/daily")
 #### LOAD DATA - USE MODEL 7 Rdata for now. ######
-mmdata <-  read.csv("Binned_data_MmBRS_20240130.csv")
+mmdata2 <-  read.csv("dailybinned_40km_UTC.csv")
+
+# Filter for October, make day variable
+mmdata2$Time <- dmy(mmdata2$Time)
+jul <- mmdata2 %>%
+  filter(month(Time) == 7)
+mmdata$day  = day(mmdata2$Time)
+
+
 # Can quickly save this data
 # Define the file path and name
 # file_path <- "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/mmdata_20231119R.csv"
@@ -37,38 +45,17 @@ mmdata <-  read.csv("Binned_data_MmBRS_20240130.csv")
 # write.csv(mmdata, file = file_path, row.names = FALSE)
 
 
-################# Thresholding & Filtering #############
+################################
+#date filtering in case we want to remove winter
+# mmdata$Time <- dmy(mmdata$Time)
+# mmdata <- mmdata %>%
+#   filter(month(Time) == 10)
+################################
 
-# Date Filtering
-
-# Convert 'Time' to a Date-Time object
-mmdata$Time <- dmy_hms(mmdata$Time)
-# Filter data to include only dates between September 15th and November 15th of any year
-mmdata <- mmdata %>%
-  filter(month(Time) == 10)
-
-# filter(month(Time) > 8, month(Time) < 12, # Ensure month is either Sept, Oct, or Nov
-#        !(month(Time) == 9 & day(Time) < 15), # Exclude dates before September 15
-#        !(month(Time) == 11 & day(Time) > 15))
-
-# Ship Range Filtering
-
-# Update minRange values greater than 30,000 to 0
-mmdata$minRange[mmdata$minRange > 40000] <- 0
-# Set sPres to 0 wherever minRange is 0
-mmdata$sPres[mmdata$minRange == 0] <- 0
-# test to make sure it worked
-mmdata$sPres[mmdata$minRange>30000 & mmdata$sPres == 0]
-
-# IMPORTANT part of this model - no SPL values less than 100dB 
-# what we could do here is make spres 0 if drops below 100 db
-
-########## End Thresholding & Filtering  ##########
 
 ## Edit variables to desired format and resolution
-mmdata$year = as.factor (mmdata$year)
+mmdata$year = as.factor(mmdata$year)
 mmdata$year = relevel(mmdata$year,"2016") # arrange years: 2009 as the baseline
-mmdata$sLag = mmdata$slag/1440 # transform min to days
 
 # no cumspres?
 # zcdata$cumsPres = zcdata$cumsPres/60 # transform min to hours
@@ -82,7 +69,8 @@ mmdata$sLag = mmdata$slag/1440 # transform min to days
 
 # define knots for cyclic splines with 4 degrees of freedom
 
-msJd = mSpline(mmdata$jd,df = 4, Boundary.knots = c(1,365),periodic = T)
+# bit of a warning here, think about leap years and a 366th julian day
+msJd = mSpline(mmdata$jd,df = 5, Boundary.knots = c(1,365),periodic = T)
 kJd = knots(msJd) 
 lJd = c(1,365)
 
@@ -91,16 +79,24 @@ lJd = c(1,365)
 #kTd = knots(msTd) 
 #lTd = c(-1,1)
 
+############ PROCEED WITH CAUTION HERE ############
+## ROUNDING - THIS SHOULD NOTED, we are doing this because poisson requires integers
+## and duty cycled periods have non integer effort adjusted presence
 
-mmGLM<-glm(MmPres ~ 
-             minRange+
-             mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
+mmdata$MmPres_eff_adj <- round(mmdata$MmPres_eff_adj)
+
+#for binomial
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
+
+############ END CAUTION
+
+mmGLM<-glm(MmPres ~
              bs(Ice_pc)+
-             bs(maxSPL)+
+             mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
              as.factor(year),
-             data=mmdata,family=poisson)
+             data=mmdata,family=binomial)
 summary(mmGLM)
-acf_res  = acf(residuals(mmGLM),6000)
+acf_res  = acf(residuals(mmGLM),100)
 
 acf_values <- acf_res$acf[-1]  # Exclude lag 0
 N <- length(residuals(mmGLM))
@@ -110,13 +106,38 @@ first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values 
 cat("First lag within bounds:", first_lag_within_bounds, "\n")
 cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
 
-#for counts it is 270. can change later
+
+# add wave and ID based on the first lag
+
+# Create a full sequence of dates
+mmdata$Time <- as.Date(mmdata$Time, format = "%d-%b-%Y")
+full_dates <- seq(min(mmdata$Time), max(mmdata$Time), by = "day")
+# Create a new dataframe from the sequence
+full_df <- data.frame(Time = full_dates)
+# Merge the full date range with the original data (this will fill missing days with NA for other columns)
+full_df <- left_join(full_df, mmdata, by = "Time")
+# Generate the wave and ID variables
+full_df <- full_df %>% 
+  mutate(
+    DayNumber = as.numeric(Time - min(Time) + 1), # Calculate the day number from the start
+    wave = ((DayNumber - 1) %% 14) + 1, # Cycle through 1 to 12 for wave
+    ID = ((DayNumber - 1) %/% 14) + 1 # Increment ID every 12 days
+  )
+# remove empty rows
+full_df <- na.omit(full_df)
+
+
+#add wave and ID
+mmdata$wave = full_df$wave
+mmdata$ID = full_df$ID
+
+
 
 # okay weird moment here with the lag times.
 
 vif1 <- 5000
 threshVIF = 5
-selectedCovariates = attributes(terms (mmGLM))$term.labels
+selectedCovariates = attributes(terms(mmGLM))$term.labels
 while (vif1>sqrt(threshVIF)){
   for (x in 1: length (selectedCovariates)){
     if (x==1){newformula <- selectedCovariates[1]}
@@ -136,87 +157,65 @@ while (vif1>sqrt(threshVIF)){
 
 
 # GVIF Df GVIF^(1/(2*Df))
-# minRange                                                     1.142429  1        1.068845
-# mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T) 2.250643  4        1.106721
-# bs(Ice_pc)                                                   2.897159  3        1.193975
-# bs(maxSPL)                                                   1.548405  3        1.075592
-# as.factor(year)                                              3.459911  4        1.167839
+# Ice_pc                                                       2.393385  1        1.547057
+# mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T) 2.595272  5        1.100065
+# as.factor(year)                                              3.549742  5        1.135062
 
 
-mmGLM2<-glm(MmPres ~
-              minRange+
-              mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
+
+mmGLM2<-glm(MmPres ~ 
               bs(Ice_pc)+
-              bs(maxSPL)+
+              mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
               as.factor(year),
-            data=mmdata,family=poisson)
+            data=mmdata,family=binomial)
+
 summary(mmGLM2)
 Anova(mmGLM2)
 
 
-# Analysis of Deviance Table (Type II tests)
-# 
-# Response: MmPres
-# LR Chisq Df Pr(>Chisq)    
-# minRange                                                        159.7  1  < 2.2e-16 ***
-#   mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T)  13661.4  4  < 2.2e-16 ***
-#   bs(Ice_pc)                                                     9491.2  3  < 2.2e-16 ***
-#   bs(maxSPL)                                                     1055.0  3  < 2.2e-16 ***
-#   as.factor(year)                                               10065.9  4  < 2.2e-16 ***
-
 
 # Autocorrelation:
-# Data group every 6 minutes based on ACF function. Cluster size selected to 
+# Data group every x timestep based on ACF function. Cluster size selected to 
 # be the same for all sites for comparison.
 
 # Full model with independent correlation structure
 
 
-
-msJd = mSpline(mmdata$jd,df = 5, Boundary.knots = c(1,365),periodic = T)
-kJd = knots(msJd) 
-lJd = c(1,365)
-
-# 20240201 - I have some ratchet code at the bottom to make the wave and ID if need
-
-# mmGEE_ar1 = geeglm(MmPres~
-#                      maxSPL+
-#                      minRange+
-#                      mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
-#                      bs(Ice_pc)+
-#                      as.factor(year),
-#                    data=mmdata,family=poisson,id=ID,waves=wave,corstr = 'ar1') 
 # 
-# QIC(mmGEE_ar1)
+# msJd = mSpline(mmdata$jd,df = 5, Boundary.knots = c(1,365),periodic = T)
+# kJd = knots(msJd) 
+# lJd = c(1,365)
+
+
+
+
+
+mmGEE_ar1 = geeglm(MmPres~
+                     bs(Ice_pc),
+                   data=mmdata,family=binomial,id=ID,waves=wave,corstr = 'ar1') 
+
+QIC(mmGEE_ar1)
+# 30 km radius: -940581.6 
+
+getPvalues(mmGEE_ar1)
+
 
 mmGEE_ar1_l = geeglm(MmPres~
-                       minRange+
-                       mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
-                       bs(Ice_pc)+
-                       bs(maxSPL)+
-                       as.factor(year),
-                   data=mmdata,family=poisson,id=ID,waves=wave,corstr = 'ar1')
+                      bs(Ice_pc)+
+                     mSpline(jd,knots=kJd,Boundary.knots=lJd,periodic=T)+
+                     as.factor(year),
+                   data=mmdata,family=binomial,id=ID,waves=wave,corstr = 'ar1')
 
 QIC(mmGEE_ar1_l)
+# -940509.6 
 
 getPvalues(mmGEE_ar1_l)
 
-# [1] "Getting marginal p-values"
-# Variable p-value
-# 1 mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T) <0.0001
-# 2                                                   bs(Ice_pc) <0.0001
-# 3                                              as.factor(year) <0.0001
-
-# for cluster ID = 289
 # Variable  p-value
-# 1 mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T)  0.13506
-# 2                                                   bs(Ice_pc)  <0.0001
-# 3                                              as.factor(year) 0.211307
-
-#for counts, cluster id = 289, but can be changed to 270
-# 1 mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T) 0.000289
-# 2                                                   bs(Ice_pc)  <0.0001
-# 3                                              as.factor(year)  <0.0001
+# 1                                                        sPres 0.551435
+# 2                                                       Ice_pc 0.083929
+# 3 mSpline(jd, knots = kJd, Boundary.knots = lJd, periodic = T)  <0.0001
+# 4                                              as.factor(year) 0.123126
 
 print(summary(mmGEE_ar1_l),digits=4)
 summary(mmGEE_ar1_l)
@@ -224,7 +223,7 @@ summary(mmGEE_ar1_l)
 coefs <- coef(mmGEE_ar1_l)
 std_errors <- sqrt(diag(vcov(mmGEE_ar1_l)))
 wald_stats <- (coefs / std_errors)^2
-mmGEE_ar1_l <- summary(mmGEE_ar1_l)
+# mmGEE_ar1_l <- summary(mmGEE_ar1_l)
 sum_mmGEE_ind$coefficients <- cbind(mmGEE_ar1_l$coefficients, Wald = wald_stats)
 print(mmGEE_ar1_l)
 
@@ -267,7 +266,7 @@ summary(posthoc, test = adjusted("tukey"))
 
 
 
-save(list = c("mmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Graphics/Models/model_17_environment/model_17_resAcf_counts.Rdata")
+save(list = c("mmGEE_ar1_l", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HM3.Rdata")
 
 
 
@@ -286,8 +285,7 @@ mmGEE = mmGEE_ar1_l
 graphics.off()
 windows() 
 otherstuff = c("jd", "Ice_pc")
-otherstuffvalue <- c(240,0)       ###perhaps better to set jd=183
-# otherstuffvalue <- c(0,mean(mmdata$minRange[mmdata$sPres==1]),mean(mmdata$cumSEL[mmdata$sPres==1]),mean(mmdata$Ice_pc),1)      
+otherstuffvalue <- c(290,mean(mmdata$Ice_pc))       ###perhaps better to set jd=183
 namethingstoshow= "year"
 axisLabel = "Year"
 predgridmaker (mmGEE, mmdata$year, namethingstoshow, otherstuff, otherstuffvalue, axisLabel, maxy=NA, maxviolin = NA)
@@ -297,20 +295,28 @@ predgridmaker (mmGEE, mmdata$year, namethingstoshow, otherstuff, otherstuffvalue
 graphics.off()
 windows() 
 otherstuff = c("year","Ice_pc")
-otherstuffvalue <- c(2021,0)      ###perhaps better to set jd=183
+otherstuffvalue <- c(2016,0)      ###perhaps better to set jd=183
 namethingstoshow= "jd"
-axisLabel = "Julian Day"
+axisLabel = "Day of Year"
 predgridmaker (mmGEE, mmdata$jd, namethingstoshow, otherstuff, otherstuffvalue, axisLabel, maxy=NA, maxviolin = NA)
 
 # plots pc ice cover
 graphics.off()
 windows() 
 otherstuff = c("year","jd")
-otherstuffvalue <- c(2021,180)       ###perhaps better to set jd=183
+otherstuffvalue <- c(2020,290)       ###perhaps better to set jd=183
 namethingstoshow= "Ice_pc"
 axisLabel = "Percent Ice Cover"
 predgridmaker (mmGEE, mmdata$Ice_pc,namethingstoshow, otherstuff, otherstuffvalue, axisLabel, maxy=NA, maxviolin = NA)
 
+# plots pc ice cover
+graphics.off()
+windows() 
+otherstuff = c("year","jd", "Ice_pc")
+otherstuffvalue <- c(2017,180,0)       ###perhaps better to set jd=183
+namethingstoshow= "sPres"
+axisLabel = "Percent Ice Cover"
+predgridmaker (mmGEE, mmdata$sPres,namethingstoshow, otherstuff, otherstuffvalue, axisLabel, maxy=NA, maxviolin = NA)
 
 # # plots minRange (1)- look below for slight change that is confusing
 # #windows()
@@ -370,37 +376,6 @@ predgridmaker2 (mmGEE, mmdata$maxSPL[mmdata$maxSPL>0],namethingstoshow, otherstu
 # predgridmaker2 (mmGEE, mmdata$sPres,namethingstoshow, otherstuff, otherstuffvalue, axisLabel, maxy=NA, maxviolin = NA)
 # 
 
-
-
-
-library(dplyr)
-library(tidyr)
-library(lubridate) # For easy date-time manipulation
-
-# Assuming df is your original dataframe with a datetime column 'Time'
-mmdata$Time <- as.POSIXct(mmdata$Time, format = "%Y-%m-%d %H:%M:%S")
-
-# Create a full sequence of minutes
-full_minutes <- seq(min(mmdata$Time), max(mmdata$Time), by = "min")
-
-# Create a new dataframe from the sequence
-full_df <- data.frame(Time = full_minutes)
-
-# Merge the full minute range with the original data (this will fill missing minutes with NA for other columns)
-# Ensure 'df' is not missing any columns for the merge to work correctly
-full_df <- left_join(full_df, mmdata, by = "Time")
-
-# Generate the wave and ID variables based on minutes
-mmdata <- full_df %>% 
-  mutate(
-    MinNumber = as.numeric(difftime(Time, min(Time), units = "mins")) + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 1415) + 1, # Cycle through 1 to 12 for wave
-    ID = ((MinNumber - 1) %/% 1415) + 1 # Increment ID every 12 days
-  )
-
-mmdata = na.omit(mmdata)
-# View the updated dataframe
-print(full_df)
 
 
 

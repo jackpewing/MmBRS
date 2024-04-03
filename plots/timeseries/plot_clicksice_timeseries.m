@@ -16,7 +16,7 @@ no_effort_end = effort_start;
 
 % Load the new data file
 dpath = 'G:\Shared drives\SWAL_Arctic\Research_projects\JackBRS\Arctic_shiptxClicks\output\Stage_two\Combine_all\publication\5km_mask\daily';
-load(fullfile(dpath, 'dailybinned_20240131_UTC.mat'));
+load(fullfile(dpath, 'dailybinned_UTC.mat'));
 
 tt = table2timetable(mmdata);
 

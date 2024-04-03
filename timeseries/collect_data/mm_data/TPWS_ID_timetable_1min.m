@@ -28,7 +28,7 @@ sitenum = 4;
 sites = {'ONC_LI','ONC_TS','ONC_GB','PI','LI','MI','ES'};
 site = char(sites(sitenum));
 
-depl = 2021; % this is the deployment year for this run
+depl = 2020; % this is the deployment year for this run
 startDate = datenum(['1/01/',num2str(depl),' 00:00:00']); % this is the left edge of the first time bin
 endDate = datenum(['1/01/',num2str(depl+1),' 00:00:00']); % this is the right edge of the last time bin
 

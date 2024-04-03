@@ -1,0 +1,69 @@
+---
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+subtitle: SOCAL site M
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load data, eval=TRUE,echo = FALSE, message = FALSE, warning = FALSE}
+mmdata = read.csv('G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/stage_two/Combine_all/publication/20km_mask/all/Binned_data_MmBRS_UTC.csv')
+```
+
+
+```{r func1, eval=TRUE,echo = FALSE, message = FALSE, warning = FALSE}
+plot.distr <- function(xid,presAbs,varU,cbase){
+
+# Figure out which rows had detections, which didn't
+posRows <- which(presAbs>0)
+negRows <- which(presAbs>=0)
+
+# Kernel densities
+d0 = stats::density(xid[negRows],na.rm = TRUE) # density for negative segments
+d1 = stats::density(xid[posRows],na.rm = TRUE) # density for positive segments
+
+x_range = range(c(d0$x,d1$x)) 
+d0$y = d0$y/max(d0$y)
+d1$y = d1$y/max(d1$y)
+
+{plot(d0, xlim = x_range, lty=1, lwd =1,col=cbase, main = "",xlab =  varU,ylab = 'Normalized counts')
+  polygon(d0, xlim = x_range,col=cbase,border = FALSE, main = "",xlab =  "",ylab = "")
+  par(new = TRUE)
+  plot(d1, xlim = x_range,lwd =2,axes = FALSE, xlab = "", ylab = "", main = "")
+  legend("topright", c("Effort","Mm Pres"),lty = 1:1,col = c(cbase,"black"),bty = "n")}
+}
+```
+
+
+```{r plot1a,eval=TRUE, message=FALSE, warning=FALSE, results='asis',echo=FALSE,fig.hold = 'hold',fig.width = 4,fig.height = 4,out.width="30%"}
+day = mmdata$day
+bwPres = mmdata$MmPres
+bwColor = "darkgray"
+plot.distr(day,bwPres,"Day of Month",bwColor)
+
+tod = mmdata$tod
+bwPres = mmdata$MmPres
+bwColor = "darkgray"
+plot.distr(tod,bwPres,"time of day",bwColor)
+
+minRange = mmdata$minRange[mmdata$minRange > 1000 & mmdata$SOG_kts > 4]
+plot.distr(minRange,bwPres,"Minimum Range to Nearest Vessel",bwColor)
+
+maxRLpp = zcdata$maxRLpp
+maxRLpp[maxRLpp==0] = NA
+plot.distr(maxRLpp,bwPres,"Max. RLpp",bwColor)
+
+cumSEL = zcdata$cumSEL
+cumSEL[cumSEL==0] = NA
+plot.distr(cumSEL,bwPres,"Cum. SEL",bwColor)
+
+plot.distr(zcdata$timeofd,bwPres,"Time of day (hrs)",bwColor)
+plot.distr(zcdata$jd,bwPres,"Julian Date",bwColor)
+plot.distr(zcdata$year,bwPres,"Year",bwColor)
+```
+
