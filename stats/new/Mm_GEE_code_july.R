@@ -35,6 +35,10 @@ options(scipen=999)
 setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
 mmdata <-  read.csv("binned_effort_UTC.csv")
 
+# remove tod
+mmdata <- mmdata %>%
+  select(-tod)
+
 # Filter for October, make day variable
 mmdata$Time <- dmy_hms(mmdata$Time)
 mmdata <- mmdata %>%
@@ -42,15 +46,10 @@ mmdata <- mmdata %>%
 mmdata$day  = day(mmdata$Time)
 
 
-sit = read.csv('I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Ice/sit/sit_CANARC_PI.csv')
-sit$dates <- as.Date(sit$dates, format="%d-%b-%Y")
-mmdata$Time <- as.POSIXct(mmdata$Time, format="%Y-%m-%d %H:%M:%S")
-mmdata$date <- as.Date(mmdata$Time)
-merged_table <- merge(mmdata, sit, by.x="date", by.y="dates", all.x=TRUE)
-mmdata$sit = merged_table$medians
+# add hour variable
+mmdata$hour = hour(mmdata$Time)
+# mmdata$minute = minute(mmdata$Time)
 
-rm(merged_table)
-rm(sit)
 
 
 # Threshold sPres based on the speed over ground
@@ -64,7 +63,6 @@ mmdata$sPres[mmdata$SOG < 4 & mmdata$sPres == 1] # test
 ## Edit variables to desired format and resolution
 mmdata$minRange = mmdata$minRange/1000 #in km 
 mmdata$minRange[mmdata$sPres == 0] = 50
-mmdata$tod = mmdata$tod*100
 
 # Filter ships for range
 mmdata <- mmdata %>%
@@ -76,7 +74,7 @@ mmdata <- mmdata %>%
 
 
 # Correlations: Pearson correlation (r>0.6)
-plotCols = c(5,9,11,30,32,33,35) # index of variables to test correlations
+plotCols = c(5,9,11,30,32,33) # index of variables to test correlations
 covarList = names(mmdata[c(plotCols)])
 data = na.omit(mmdata)
 corData = cor(data[covarList])
@@ -95,28 +93,25 @@ graphics.off()
 # ------------------------------------------------------------------------------
 
 # define knots for cyclic splines with 4 degrees of freedom
-msTd = mSpline(mmdata$tod,df = 4, Boundary.knots = c(-100,100),periodic = T)
+msTd = mSpline(mmdata$hour,df = 4, Boundary.knots = c(0,24),periodic = T)
 kTd = knots(msTd) 
-lTd = c(-100,100)
+lTd = c(0,24)
 
 # We test what is best, smooth or linear
-# sLag
-s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+# day
+s = geeglm(MmPres ~  day ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~ bs(day), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+p = geeglm(MmPres ~ bs(day, df =5), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 geepack::QIC(s)[1]  
 geepack::QIC(l)[1]  
 geepack::QIC(p)[1] 
 
-# !!! bs(Ice_pc, knots = 1) - 161892 
-# !!! bs(sit, df = 3) -       164391.8 
-# !!!  bs(day, df = 5) -      159264.2 
 
 # sPres:bs(minRange) - 172911.9 
 # !!!! sPres:bs(minRange, knots = 1) - 172592.1 
 
-s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~  bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+s = geeglm(MmPres ~  sPres:bs(minRange, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~  sPres:bs(minRange), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 geepack::QIC(s)[1]  
 geepack::QIC(l)[1]  
@@ -127,11 +122,10 @@ geepack::QIC(p)[1]
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             bs(day, df = 5) + # kts changes nothing here, df does
-             bs(sit,df = 3) +
-             # bs(maxSPL, knots = 1)+
-             # bs(Ice_pc, knots = 1)+
-             mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
+             bs(day,knots = 5)+# kts changes nothing here, df does
+             # bs(maxSPL)+
+             bs(Ice_pc, knots = 1)+
+             mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
              # as.factor(year)+
              sPres:bs(minRange, knots = 1),
            data=mmdata,family=binomial)
@@ -161,18 +155,18 @@ while (vif1>threshVIF){
 # mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  1.0  4             1.0
 # sPres:bs(minRange, knots = 1)                                  1.1  4             1.0
 
-acf_res  = acf(residuals(mmGLM),5000)
-# windows()
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(3500, 4000), ylim = c(-0.05, 0.12))
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
+acf_res  = acf(residuals(mmGLM),15000)
+windows()
+plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
+plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
 
 
 acf_values <- acf_res$acf[-1]  # Exclude lag 0
 N <- length(residuals(mmGLM))
-# conf_interval_upper <- 1.96 / sqrt(N)
-conf_interval_upper <- 0.1 # how morgan did it !
-# conf_interval_lower <- -1.96 / sqrt(N)
-conf_interval_lower <- -0.1 # How Morgan did it
+conf_interval_upper <- 1.96 / sqrt(N)
+# conf_interval_upper <- 0.1 # how morgan did it !
+conf_interval_lower <- -1.96 / sqrt(N)
+# conf_interval_lower <- -0.1 # How Morgan did it
 
 first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
 cat("First lag within bounds:", first_lag_within_bounds, "\n")
@@ -216,12 +210,12 @@ rm(full_df)
 # ------------------------------------------------------------------------------
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     bs(day, df = 5) + # kts changes nothing here, df does
-                     bs(sit,df = 3) +
+                     bs(day)+ # kts changes nothing here, df does
                      # bs(maxSPL)+
-                     # bs(Ice_pc, knots = 1)+
-                     mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
+                     bs(Ice_pc, knots = 1)+
+                     # mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
                      # as.factor(year)+
+                     # as.factor(sPres),
                      sPres:bs(minRange, knots = 1),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 
@@ -253,13 +247,13 @@ anova(MmGEE_ind)
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     bs(day, df = 5) + # kts changes nothing here, df does
-                     bs(sit,df = 3) +
+                     bs(day) + # kts changes nothing here, df does
                      # bs(maxSPL)+
-                     # bs(Ice_pc, knots = 1)+
-                     mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     # as.factor(year)+
-                     sPres:bs(minRange, knots = 1),
+                     bs(Ice_pc)+
+                     # mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
+                     as.factor(year)+
+                     # as.factor(sPres),
+                   sPres:minRange,
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
@@ -318,7 +312,7 @@ print(summary(MmGEE_ind),digits=4)
 
 
 
-save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind.Rdata")
+# save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind.Rdata")
 
 
 mmGEE = MmGEE_ind
@@ -330,25 +324,25 @@ graphics.off()
   par(mfrow=c(2,2))
   
   # Plots RNV
-  otherstuff = c("sPres","day","tod", "sit")
-  otherstuffvalue <- c(0,15,0, median(mmdata$sit))       ###perhaps better to set jd=183
+  otherstuff = c("sPres","day", "Ice_pc")
+  otherstuffvalue <- c(1,15, median(mmdata$Ice_pc))       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
-  predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 0], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
   ###### Plots sit
-  otherstuff = c("sPres","minRange", "tod", "day")
-  otherstuffvalue <- c(0,50, 0, 15)    
-  namethingstoshow= "sit"
-  axisLabel = "Thin Ice Thickness (cm)"
-  predgridmaker (mmGEE, mmdata$sit[mmdata$sit < 40], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  otherstuff = c("sPres","minRange", "day")
+  otherstuffvalue <- c(0,50, 15)    
+  namethingstoshow= "Ice_pc"
+  axisLabel = "Sea Ice Concentration"
+  predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   
   ###### Plots m
-  otherstuff = c("sPres","minRange", "tod", "sit")
-  otherstuffvalue <- c(0,50, 0, median(mmdata$sit))    
+  otherstuff = c("sPres","minRange", "Ice_pc")
+  otherstuffvalue <- c(0,50, median(mmdata$Ice_pc))    
   namethingstoshow= "day"
-  axisLabel = "Day of Month (October)"
+  axisLabel = "Day of Month"
   predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   # ###### Plots year
