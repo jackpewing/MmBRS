@@ -47,8 +47,8 @@ mmdata$day  = day(mmdata$Time)
 
 
 # add hour variable
-mmdata$hour = hour(mmdata$Time)
-# mmdata$minute = minute(mmdata$Time)
+mmdata$hour = hour(mmdata$Time) + 1
+mmdata$minute = minute(mmdata$Time) * mmdata$hour
 
 
 
@@ -93,9 +93,9 @@ graphics.off()
 # ------------------------------------------------------------------------------
 
 # define knots for cyclic splines with 4 degrees of freedom
-msTd = mSpline(mmdata$hour,df = 4, Boundary.knots = c(0,24),periodic = T)
+msTd = mSpline(mmdata$minute,df = 4, Boundary.knots = c(1,1440),periodic = T)
 kTd = knots(msTd) 
-lTd = c(0,24)
+lTd = c(1,1440)
 
 # We test what is best, smooth or linear
 # day
@@ -110,7 +110,7 @@ geepack::QIC(p)[1]
 # sPres:bs(minRange) - 172911.9 
 # !!!! sPres:bs(minRange, knots = 1) - 172592.1 
 
-s = geeglm(MmPres ~  sPres:bs(minRange, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+s = geeglm(MmPres ~  sPres:bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 l = geeglm(MmPres ~  sPres:bs(minRange), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 geepack::QIC(s)[1]  
@@ -122,12 +122,13 @@ geepack::QIC(p)[1]
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             bs(day,knots = 5)+# kts changes nothing here, df does
+             bs(day, df = 3)+# kts changes nothing here, df does
              # bs(maxSPL)+
-             bs(Ice_pc, knots = 1)+
-             mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
-             # as.factor(year)+
-             sPres:bs(minRange, knots = 1),
+             bs(Ice_pc)+
+             # mSpline(minute,knots=kTd,Boundary.knots=lTd,periodic=T)+
+             bs(minRange, knots = 40),
+             # as.factor(year),
+             # sPres:bs(minRange, knots = 40),
            data=mmdata,family=binomial)
 vif1 <- 5000
 threshVIF = 3
@@ -156,9 +157,9 @@ while (vif1>threshVIF){
 # sPres:bs(minRange, knots = 1)                                  1.1  4             1.0
 
 acf_res  = acf(residuals(mmGLM),15000)
-windows()
-plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
-plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
+# windows()
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
 
 
 acf_values <- acf_res$acf[-1]  # Exclude lag 0
@@ -210,13 +211,13 @@ rm(full_df)
 # ------------------------------------------------------------------------------
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     bs(day)+ # kts changes nothing here, df does
+                     bs(day)+# kts changes nothing here, df does
                      # bs(maxSPL)+
-                     bs(Ice_pc, knots = 1)+
-                     # mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     # as.factor(year)+
-                     # as.factor(sPres),
-                     sPres:bs(minRange, knots = 1),
+                     bs(Ice_pc)+
+                     # mSpline(minute,knots=kTd,Boundary.knots=lTd,periodic=T)+
+                     bs(minRange, knots = 40),
+                   # as.factor(year),
+                   # sPres:bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
@@ -247,13 +248,13 @@ anova(MmGEE_ind)
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     bs(day) + # kts changes nothing here, df does
+                     bs(day)+# kts changes nothing here, df does
                      # bs(maxSPL)+
                      bs(Ice_pc)+
-                     # mSpline(hour,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     as.factor(year)+
-                     # as.factor(sPres),
-                   sPres:minRange,
+                     # mSpline(minute,knots=kTd,Boundary.knots=lTd,periodic=T)+
+                     bs(minRange, knots = 40),
+                   # as.factor(year),
+                   # sPres:bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
@@ -270,40 +271,6 @@ anova(MmGEE_ar1)
 
 
 print(summary(MmGEE_ind),digits=4) 
-
-# Call:
-#   geeglm(formula = MmPres ~ bs(sit) + bs(maxSPL) + mSpline(tod, 
-#                                                            knots = kTd, Boundary.knots = lTd, periodic = T) + as.factor(year) + 
-#            sPres:bs(minRange), family = binomial, data = mmdata, id = ID, 
-#          waves = wave, scale.fix = T)
-# 
-# Coefficients:
-#   Estimate  Std.err   Wald Pr(>|W|)   
-# (Intercept)                                                     -3.1884   1.0369  9.455  0.00211 **
-#   bs(sit)1                                                         6.5335   2.1049  9.634  0.00191 **
-#   bs(sit)2                                                       -14.4205   4.4395 10.551  0.00116 **
-#   bs(sit)3                                                        -0.5301   1.1924  0.198  0.65662   
-# bs(maxSPL)1                                                      0.5938   2.6600  0.050  0.82336   
-# bs(maxSPL)2                                                      0.6139   2.6727  0.053  0.81833   
-# bs(maxSPL)3                                                     -4.5423   3.9429  1.327  0.24931   
-# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)1  23.0693  11.7044  3.885  0.04873 * 
-#   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)2  22.9357   8.3873  7.478  0.00625 **
-#   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)3  11.2270  11.2912  0.989  0.32007   
-# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)4   0.6809  16.5786  0.002  0.96724   
-# as.factor(year)2017                                             -0.2671   0.6625  0.163  0.68686   
-# as.factor(year)2018                                              1.0510   0.5311  3.915  0.04785 * 
-#   as.factor(year)2019                                              1.3067   0.5742  5.179  0.02287 * 
-#   as.factor(year)2020                                             -0.1766   0.5894  0.090  0.76452   
-# sPres:bs(minRange)1                                             -2.4562   1.1178  4.829  0.02799 * 
-#   sPres:bs(minRange)2                                              2.7907   1.2425  5.045  0.02470 * 
-#   sPres:bs(minRange)3                                             -1.9537   1.1395  2.939  0.08644 . 
-# ---
-#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Correlation structure = independence 
-# Scale is fixed.
-# 
-# Number of clusters:   68  Maximum cluster size: 3592 
 
 
 
@@ -324,8 +291,8 @@ graphics.off()
   par(mfrow=c(2,2))
   
   # Plots RNV
-  otherstuff = c("sPres","day", "Ice_pc")
-  otherstuffvalue <- c(1,15, median(mmdata$Ice_pc))       ###perhaps better to set jd=183
+  otherstuff = c("day", "Ice_pc")
+  otherstuffvalue <- c(15, 0)       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
   predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)

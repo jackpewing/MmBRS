@@ -24,8 +24,8 @@ library(geeasy)
 library(lubridate)
 library(dplyr)
 source('C:/Users/HARP/Documents/GitHub/MmBRS/stats/new/myviolin.R')
-source('C:/Users/HARP/Documents/GitHub/MmBRS/stats/new/predgridmaker.R')
-
+# source('C:/Users/HARP/Documents/GitHub/MmBRS/stats/new/predgridmaker.R')
+source('C:/Users/HARP/Documents/GitHub/MmBRS/predgridmaker.R')
 options(scipen=999)
 #_______________________________________________________________________________
 #          A) Analysis limited to 2009 - 2014 for comparison with site N and H
@@ -65,6 +65,11 @@ mmdata$sPres[mmdata$SOG < 4 & mmdata$sPres == 1] # test
 mmdata$minRange = mmdata$minRange/1000 #in km 
 mmdata$minRange[mmdata$sPres == 0] = 50
 mmdata$tod = mmdata$tod*100
+
+# Filter ships for range
+mmdata <- mmdata %>%
+  filter(minRange > 1)
+
 # ------------------------------------------------------------------------------
 # Check correlation and collinearity of variables
 # ------------------------------------------------------------------------------
@@ -96,22 +101,42 @@ lTd = c(-100,100)
 
 # We test what is best, smooth or linear
 # sLag
-s = geeglm(MmPres ~ bs(minRange),data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ sLag, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1] 
+s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+p = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(s)[1]  
+geepack::QIC(l)[1]  
+geepack::QIC(p)[1] 
+
+# !!! bs(Ice_pc, knots = 1) - 161892 
+# !!! bs(sit, df = 3) -       164391.8 
+# !!!  bs(day, df = 5) -      159264.2 
+
+# sPres:bs(minRange) - 172911.9 
+# !!!! sPres:bs(minRange, knots = 1) - 172592.1 
+
+s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~  bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(s)[1]  
+geepack::QIC(l)[1]  
+geepack::QIC(p)[1] 
+
+
 
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             bs(day)+
-             bs(sit)+
-             bs(maxSPL)+
+             bs(day) + # kts changes nothing here, df does
+             bs(sit) +
+             # bs(maxSPL, knots = 1)+
+             # bs(Ice_pc, knots = 1)+
              mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
              # as.factor(year)+
-             sPres:minRange,
+             bs(minRange, knots = 40),
            data=mmdata,family=binomial)
 vif1 <- 5000
-threshVIF = 5
+threshVIF = 3
 selectedCovariates = attributes(terms (mmGLM))$term.labels
 while (vif1>threshVIF){
   
@@ -129,27 +154,30 @@ while (vif1>threshVIF){
   vif1 = viftemp[vif2, 1]
   if (vif1>threshVIF){   selectedCovariates <- selectedCovariates[-vif2] }
 }
-    #                                                               GVIF Df GVIF..1..2.Df..
-    # bs(sit)                                                        2.6  3             1.2
-    # bs(maxSPL)                                                     1.5  3             1.1
-    # mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  1.0  4             1.0
-    # as.factor(year)                                                2.9  4             1.1
-    # sPres:bs(minRange)                                             1.2  3             1.0
+
+# GVIF Df GVIF..1..2.Df..
+# bs(day, df = 5)                                                1.4  5             1.0
+# bs(sit, df = 3)                                                1.3  3             1.1
+# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  1.0  4             1.0
+# sPres:bs(minRange, knots = 1)                                  1.1  4             1.0
 
 acf_res  = acf(residuals(mmGLM),5000)
+# windows()
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(3500, 4000), ylim = c(-0.05, 0.12))
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
 
 
 acf_values <- acf_res$acf[-1]  # Exclude lag 0
 N <- length(residuals(mmGLM))
-# conf_interval_upper <- 1.96 / sqrt(N)
-conf_interval_upper <- 0.1 # how morgan did it !
-# conf_interval_lower <- -1.96 / sqrt(N)
-conf_interval_lower <- -0.1 # How Morgan did it
+conf_interval_upper <- 1.96 / sqrt(N)
+# conf_interval_upper <- 0.1 # how morgan did it !
+conf_interval_lower <- -1.96 / sqrt(N)
+# conf_interval_lower <- -0.1 # How Morgan did it
 
 first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
 cat("First lag within bounds:", first_lag_within_bounds, "\n")
 cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
-# 3582 ~  2.5 days 
+# 3773 ~  2.5 days 
 
 ### CREATE WAVE + ID
 
@@ -166,8 +194,9 @@ full_df <- left_join(full_df, mmdata, by = "Time")
 mmdata <- full_df %>% 
   mutate(
     MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/1 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 1131) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 1131) + 1 # Increment ID 
+    wave = ((MinNumber - 1) %% 120) + 1, # Cycle through
+    ID = ((MinNumber - 1) %/% 120
+          ) + 1 # Increment ID 
   )
 
 mmdata = na.omit(mmdata)
@@ -187,13 +216,15 @@ rm(full_df)
 # ------------------------------------------------------------------------------
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     bs(day)+
-                     bs(sit)+
-                     bs(maxSPL)+
+                     bs(day) + # kts changes nothing here, df does
+                     bs(sit) +
+                     # bs(maxSPL, knots = 1)+
+                     # bs(Ice_pc, knots = 1)+
                      mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
                      # as.factor(year)+
-                     sPres:minRange,
+                     bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
+
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
 
 # Single term deletions
@@ -222,13 +253,22 @@ anova(MmGEE_ind)
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     bs(sit)+
+                     bs(day, df = 5) + # kts changes nothing here, df does
+                     bs(sit,df = 3) +
+                     # bs(maxSPL)+
+                     # bs(Ice_pc, knots = 1)+
                      mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     as.factor(year)+
-                     sPres:bs(minRange),
+                     # as.factor(year)+
+                     sPres:bs(minRange, knots = 1),
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
+
+
+
+QIC(MmGEE_ar1)
+
+
 
 anova(MmGEE_ar1)
 
@@ -278,7 +318,7 @@ print(summary(MmGEE_ind),digits=4)
 
 
 
-save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM2range_ar1.Rdata")
+save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind.Rdata")
 
 
 mmGEE = MmGEE_ind
@@ -286,43 +326,43 @@ mmGEE = MmGEE_ind
 graphics.off()
 
 {#plot.new()            # Create empty plot in RStudios' default window
-  dev.new(width = 7,height = 8,noRStudioGD = TRUE)   # Create new plot window
+  dev.new(width = 14,height = 12,noRStudioGD = TRUE)   # Create new plot window
   par(mfrow=c(2,2))
   
-  ##### Plots RNV
-  otherstuff = c("sPres","year","tod", "sit")
-  otherstuffvalue <- c(1,2019,0,min(mmdata$sit))       ###perhaps better to set jd=183
+  # Plots RNV
+  otherstuff = c("day","tod", "sit")
+  otherstuffvalue <- c(15,0, min(mmdata$sit))       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
-  predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres==1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-  ###### Plots timeofd
-  otherstuff = c("year","sPres","minRange","maxSPL", "tod")
-  otherstuffvalue <- c(2016,0,50,mean(mmdata$maxSPL), 0)    
+  ###### Plots sit
+  otherstuff = c("minRange", "tod", "day")
+  otherstuffvalue <- c(50, 0, 15)    
   namethingstoshow= "sit"
   axisLabel = "Thin Ice Thickness (cm)"
-  predgridmaker (mmGEE, mmdata$sit, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  predgridmaker (mmGEE, mmdata$sit[mmdata$sit < 40], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   
-  ###### Plots maxSPL
-  otherstuff = c("year","sPres","minRange", "tod", "sit")
-  otherstuffvalue <- c(2016,0,50, 0, mean(mmdata$sit))    
-  namethingstoshow= "maxSPL"
-  axisLabel = "Maximum Sound Pressure Level (dB rms [20-10,000 Hz])"
-  predgridmaker (mmGEE, mmdata$maxSPL, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  ###### Plots m
+  otherstuff = c("sPres","minRange", "tod", "sit")
+  otherstuffvalue <- c(0,50, 0, median(mmdata$sit))    
+  namethingstoshow= "day"
+  axisLabel = "Day of Month (October)"
+  predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
-  ###### Plots year
-  otherstuff = c("sPres","minRange","maxSPL", "tod", "sit")
-  otherstuffvalue <- c(0,50,mean(mmdata$maxSPL),0,mean(mmdata$sit))       ###perhaps better to set jd=183
-  namethingstoshow= "year"
-  axisLabel = "Year"
-  predgridmaker (mmGEE, as.factor(mmdata$year), namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
-  
+  # ###### Plots year
+  # otherstuff = c("sPres","minRange","maxSPL", "tod", "sit")
+  # otherstuffvalue <- c(0,50,mean(mmdata$maxSPL),0,mean(mmdata$sit))       ###perhaps better to set jd=183
+  # namethingstoshow= "year"
+  # axisLabel = "Year"
+  # predgridmaker (mmGEE, as.factor(mmdata$year), namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  # 
   ###### Plots timeofd
-  otherstuff = c("year","sPres","minRange","maxSPL", "sit")
-  otherstuffvalue <- c(2016,0,50,mean(mmdata$maxSPL), mean(mmdata$sit))    
+  otherstuff = c("sPres","minRange", "sit", "day")
+  otherstuffvalue <- c(0,50, mean(mmdata$sit), 15)    
   namethingstoshow= "tod"
-  axisLabel = "Normalized time of day"
+  axisLabel = "Normalized Time of Day"
   predgridmaker (mmGEE, mmdata$tod, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
 }
@@ -332,7 +372,7 @@ graphics.off()
 {#plot.new()            # Create empty plot in RStudios' default window
   dev.new(width = 7,height = 8,noRStudioGD = TRUE)   # Create new plot window
   par(mfrow=c(2,2))
-  
+
   ##### Plots RNV
   otherstuff = c("sPres","year","tod", "sit")
   otherstuffvalue <- c(1,2016,0,mean(mmdata$sit))       ###perhaps better to set jd=183
@@ -370,4 +410,7 @@ graphics.off()
   predgridmaker (mmGEE, mmdata$tod, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
 }
+
+
+
 
