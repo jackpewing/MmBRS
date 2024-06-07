@@ -32,8 +32,13 @@ options(scipen=999)
 #_______________________________________________________________________________
 
 ## Load Data
-setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
-mmdata <-  read.csv("binned_effort_UTC.csv")
+# setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
+# mmdata <-  read.csv("binned_effort_UTC.csv")
+
+setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/5min_effadj")
+mmdata <-  read.csv("effadj_binned_5min_UTC.csv")
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0) # if data is lower resolution
+
 
 # Filter for October, make day variable
 mmdata$Time <- dmy_hms(mmdata$Time)
@@ -67,8 +72,8 @@ mmdata$minRange[mmdata$sPres == 0] = 50
 mmdata$tod = mmdata$tod*100
 
 # Filter ships for range
-mmdata <- mmdata %>%
-  filter(minRange > 1)
+# mmdata <- mmdata %>%
+#   filter(minRange > 1)
 
 # ------------------------------------------------------------------------------
 # Check correlation and collinearity of variables
@@ -76,7 +81,7 @@ mmdata <- mmdata %>%
 
 
 # Correlations: Pearson correlation (r>0.6)
-plotCols = c(5,9,11,30,32,33,35) # index of variables to test correlations
+plotCols = c(2,4,5,9,12,15,17) # index of variables to test correlations
 covarList = names(mmdata[c(plotCols)])
 data = na.omit(mmdata)
 corData = cor(data[covarList])
@@ -90,6 +95,59 @@ graphics.off()
 }
 # -> Correlated variables: sProp/maxRLpp, sProp/cumSEL, maxRLpp/cumSEL
 
+
+# ------------------------------------------------------------------------------
+### GET CLUSTER SIZE
+# ------------------------------------------------------------------------------
+
+acf_full  = acf(mmdata$MmPres,3000)
+# acf_res  = acf(residuals(mmGLM),3000)
+# windows()
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
+# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
+
+
+acf_values <- acf_full$acf[-1]  # Exclude lag 0
+N <- length(mmdata$MmPres)
+conf_interval_upper <- 1.96 / sqrt(N)
+# conf_interval_upper <- 0.1 # how morgan did it !
+conf_interval_lower <- -1.96 / sqrt(N)
+# conf_interval_lower <- -0.1 # How Morgan did it
+
+first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
+cat("First lag within bounds:", first_lag_within_bounds, "\n")
+cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
+# 2283 ~ 8 days
+
+### CREATE WAVE + ID
+
+# Assuming df is your original dataframe with a datetime column 'Time'
+mmdata$Time <- as.POSIXct(mmdata$Time, format = "%Y-%m-%d %H:%M:%S")
+# Create a full sequence of minutes
+full_minutes <- seq(min(mmdata$Time), max(mmdata$Time), by = "5 min")
+# Create a new dataframe from the sequence
+full_df <- data.frame(Time = full_minutes)
+# Merge the full minute range with the original data (this will fill missing minutes with NA for other columns)
+# Ensure 'df' is not missing any columns for the merge to work correctly
+full_df <- left_join(full_df, mmdata, by = "Time")
+# Generate the wave and ID variables based on minutes
+mmdata <- full_df %>% 
+  mutate(
+    MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/5 + 1, # Calculate the day number from the start
+    wave = ((MinNumber - 1) %% 1794  ) + 1, # Cycle through
+    ID = ((MinNumber - 1) %/% 1794    
+    ) + 1 # Increment ID 
+  )
+
+mmdata = na.omit(mmdata)
+
+rm(full_df)
+
+# MAKE NARWHALS NUMERIC
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0) # if data is lower resolution
+
+
+
 # ------------------------------------------------------------------------------
 # Define cyclic splines and select if smooth or linear for sonar-related variables based on QIC
 # ------------------------------------------------------------------------------
@@ -101,28 +159,33 @@ lTd = c(-100,100)
 
 # We test what is best, smooth or linear
 # sLag
-s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 p = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(p)[1]  
+geepack::QIC(l)[1] 
 
-# !!! bs(Ice_pc, knots = 1) - 161892 
-# !!! bs(sit, df = 3) -       164391.8 
-# !!!  bs(day, df = 5) -      159264.2 
+t = geeglm(MmPres ~  sit, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+u = geeglm(MmPres ~  bs(sit),data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(t)[1]  
+geepack::QIC(u)[1]  
 
-# sPres:bs(minRange) - 172911.9 
-# !!!! sPres:bs(minRange, knots = 1) - 172592.1 
+r = geeglm(MmPres ~  minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+s = geeglm(MmPres ~  bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(r)[1]  
+geepack::QIC(s)[1]
 
-s = geeglm(MmPres ~  bs(Ice_pc, knots = 1) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~  bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+x = geeglm(MmPres ~  maxSPL, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+y = geeglm(MmPres ~  bs(maxSPL) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(x)[1]  
+geepack::QIC(y)[1]  
+
+a = geeglm(MmPres ~  day, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+b = geeglm(MmPres ~  bs(day) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(a)[1]  
+geepack::QIC(b)[1]  
 
 
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0) # if data is lower resolution
 
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
@@ -130,9 +193,9 @@ mmGLM<-glm(MmPres ~
              bs(day) + # kts changes nothing here, df does
              bs(sit) +
              # bs(maxSPL, knots = 1)+
-             # bs(Ice_pc, knots = 1)+
+             bs(Ice_pc)+
              mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
-             # as.factor(year)+
+             as.factor(year)+
              bs(minRange, knots = 40),
            data=mmdata,family=binomial)
 vif1 <- 5000
@@ -161,47 +224,6 @@ while (vif1>threshVIF){
 # mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  1.0  4             1.0
 # sPres:bs(minRange, knots = 1)                                  1.1  4             1.0
 
-acf_res  = acf(residuals(mmGLM),5000)
-# windows()
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(3500, 4000), ylim = c(-0.05, 0.12))
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
-
-
-acf_values <- acf_res$acf[-1]  # Exclude lag 0
-N <- length(residuals(mmGLM))
-conf_interval_upper <- 1.96 / sqrt(N)
-# conf_interval_upper <- 0.1 # how morgan did it !
-conf_interval_lower <- -1.96 / sqrt(N)
-# conf_interval_lower <- -0.1 # How Morgan did it
-
-first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
-cat("First lag within bounds:", first_lag_within_bounds, "\n")
-cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
-# 3773 ~  2.5 days 
-
-### CREATE WAVE + ID
-
-# Assuming df is your original dataframe with a datetime column 'Time'
-mmdata$Time <- as.POSIXct(mmdata$Time, format = "%Y-%m-%d %H:%M:%S")
-# Create a full sequence of minutes
-full_minutes <- seq(min(mmdata$Time), max(mmdata$Time), by = "1 min")
-# Create a new dataframe from the sequence
-full_df <- data.frame(Time = full_minutes)
-# Merge the full minute range with the original data (this will fill missing minutes with NA for other columns)
-# Ensure 'df' is not missing any columns for the merge to work correctly
-full_df <- left_join(full_df, mmdata, by = "Time")
-# Generate the wave and ID variables based on minutes
-mmdata <- full_df %>% 
-  mutate(
-    MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/1 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 120) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 120
-          ) + 1 # Increment ID 
-  )
-
-mmdata = na.omit(mmdata)
-
-rm(full_df)
 
 
 
@@ -209,57 +231,47 @@ rm(full_df)
 
 
 
-# -> patterns of multicollinearity confirmed: sProp and cumSEL removed
+# -> patterns of multicollinearity confirmed:
 
 # ------------------------------------------------------------------------------
 # Select best model based on backward selection p-value
 # ------------------------------------------------------------------------------
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     bs(day) + # kts changes nothing here, df does
+                     bs(day) + 
                      bs(sit) +
-                     # bs(maxSPL, knots = 1)+
-                     # bs(Ice_pc, knots = 1)+
-                     mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     # as.factor(year)+
+                     # mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T) + 
                      bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
 
-# Single term deletions
-# 
-# Model:
-#   MmPres ~ bs(sit) + mSpline(tod, knots = kTd, Boundary.knots = lTd, 
-#                              periodic = T) + as.factor(year) + sPres:bs(minRange)
-# DF  Wald Pr(>Chi)    
-# bs(sit)                                                        3  8.91  0.03058 *  
-#   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  4 11.88  0.01827 *  
-#   as.factor(year)                                                4 18.00  0.00124 ** 
-#   sPres:bs(minRange)                                             3 17.17  0.00065 ***
 
 QIC(MmGEE_ind)
 
-
 anova(MmGEE_ind)
 
-#                                                                 Df   X2   P(>|Chi|)    
-# bs(sit)                                                          3  7.2   0.06570 .  
-# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)    4 15.4   0.00389 ** 
-#   as.factor(year)                                                4 16.4   0.00258 ** 
-#   sPres:bs(minRange)                                             3 17.2   0.00065 ***
+# > anova(MmGEE_ind)
+# Analysis of 'Wald statistic' Table
+# Model: binomial, link: logit
+# Response: MmPres
+# Terms added sequentially (first to last)
+# 
+# Df     X2    P(>|Chi|)    
+# bs(day)                   3 15.634     0.001348 ** 
+#   bs(sit)                   3 11.811     0.008060 ** 
+#   bs(minRange, knots = 40)  4 38.440 0.0000000909 ***
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
 
 
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     bs(day, df = 5) + # kts changes nothing here, df does
-                     bs(sit,df = 3) +
-                     # bs(maxSPL)+
-                     # bs(Ice_pc, knots = 1)+
-                     mSpline(tod,knots=kTd,Boundary.knots=lTd,periodic=T)+
-                     # as.factor(year)+
-                     sPres:bs(minRange, knots = 1),
+                     bs(day) + 
+                     bs(sit) +
+                     bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
@@ -272,53 +284,14 @@ QIC(MmGEE_ar1)
 
 anova(MmGEE_ar1)
 
-
-
-
 print(summary(MmGEE_ind),digits=4) 
 
-# Call:
-#   geeglm(formula = MmPres ~ bs(sit) + bs(maxSPL) + mSpline(tod, 
-#                                                            knots = kTd, Boundary.knots = lTd, periodic = T) + as.factor(year) + 
-#            sPres:bs(minRange), family = binomial, data = mmdata, id = ID, 
-#          waves = wave, scale.fix = T)
-# 
-# Coefficients:
-#   Estimate  Std.err   Wald Pr(>|W|)   
-# (Intercept)                                                     -3.1884   1.0369  9.455  0.00211 **
-#   bs(sit)1                                                         6.5335   2.1049  9.634  0.00191 **
-#   bs(sit)2                                                       -14.4205   4.4395 10.551  0.00116 **
-#   bs(sit)3                                                        -0.5301   1.1924  0.198  0.65662   
-# bs(maxSPL)1                                                      0.5938   2.6600  0.050  0.82336   
-# bs(maxSPL)2                                                      0.6139   2.6727  0.053  0.81833   
-# bs(maxSPL)3                                                     -4.5423   3.9429  1.327  0.24931   
-# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)1  23.0693  11.7044  3.885  0.04873 * 
-#   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)2  22.9357   8.3873  7.478  0.00625 **
-#   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)3  11.2270  11.2912  0.989  0.32007   
-# mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)4   0.6809  16.5786  0.002  0.96724   
-# as.factor(year)2017                                             -0.2671   0.6625  0.163  0.68686   
-# as.factor(year)2018                                              1.0510   0.5311  3.915  0.04785 * 
-#   as.factor(year)2019                                              1.3067   0.5742  5.179  0.02287 * 
-#   as.factor(year)2020                                             -0.1766   0.5894  0.090  0.76452   
-# sPres:bs(minRange)1                                             -2.4562   1.1178  4.829  0.02799 * 
-#   sPres:bs(minRange)2                                              2.7907   1.2425  5.045  0.02470 * 
-#   sPres:bs(minRange)3                                             -1.9537   1.1395  2.939  0.08644 . 
-# ---
-#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Correlation structure = independence 
-# Scale is fixed.
-# 
-# Number of clusters:   68  Maximum cluster size: 3592 
 
 
 
 
 
-
-
-
-save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind.Rdata")
+save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM4range_ind_40kt.Rdata")
 
 
 mmGEE = MmGEE_ind
@@ -330,34 +303,34 @@ graphics.off()
   par(mfrow=c(2,2))
   
   # Plots RNV
-  otherstuff = c("day","tod", "sit")
-  otherstuffvalue <- c(15,0, min(mmdata$sit))       ###perhaps better to set jd=183
+  otherstuff = c("day","sit")
+  otherstuffvalue <- c(15,median(mmdata$sit))       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
   predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
   ###### Plots sit
-  otherstuff = c("minRange", "tod", "day")
-  otherstuffvalue <- c(50, 0, 15)    
+  otherstuff = c("minRange", "day")
+  otherstuffvalue <- c(50, 15)    
   namethingstoshow= "sit"
   axisLabel = "Thin Ice Thickness (cm)"
   predgridmaker (mmGEE, mmdata$sit[mmdata$sit < 40], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   
   ###### Plots m
-  otherstuff = c("sPres","minRange", "tod", "sit")
-  otherstuffvalue <- c(0,50, 0, median(mmdata$sit))    
+  otherstuff = c("minRange",  "sit")
+  otherstuffvalue <- c(50, median(mmdata$sit))    
   namethingstoshow= "day"
   axisLabel = "Day of Month (October)"
   predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
-  # ###### Plots year
-  # otherstuff = c("sPres","minRange","maxSPL", "tod", "sit")
-  # otherstuffvalue <- c(0,50,mean(mmdata$maxSPL),0,mean(mmdata$sit))       ###perhaps better to set jd=183
-  # namethingstoshow= "year"
-  # axisLabel = "Year"
-  # predgridmaker (mmGEE, as.factor(mmdata$year), namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
-  # 
+  ###### Plots year
+  otherstuff = c("sPres","minRange","maxSPL", "tod", "sit")
+  otherstuffvalue <- c(0,50,mean(mmdata$maxSPL),0,mean(mmdata$sit))       ###perhaps better to set jd=183
+  namethingstoshow= "year"
+  axisLabel = "Year"
+  predgridmaker (mmGEE, as.factor(mmdata$year), namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+
   ###### Plots timeofd
   otherstuff = c("sPres","minRange", "sit", "day")
   otherstuffvalue <- c(0,50, mean(mmdata$sit), 15)    
