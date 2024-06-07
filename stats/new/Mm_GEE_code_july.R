@@ -1,15 +1,9 @@
-# The short and long-term tolerance of Cuvier's beaked whale under longstanding
-# naval sonar pressures
-# Solsona-Berga et al.
-# PNAS
+
 
 # Using Generalized Estimating Equations (GEEs) to quantify 
-# Cuvier's beaked whale behavioral response to mid-frequency active sonar in
-# Souhtern California
 
-# site M
 
-# A) Analysis limited to 2009 - 2014 for comparison with site N and H (site M only has data within these years)
+
 
 # ______________________________________________________________________________
 
