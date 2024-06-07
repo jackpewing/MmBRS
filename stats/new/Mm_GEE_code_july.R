@@ -37,6 +37,7 @@ options(scipen=999)
 
 setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/5min_effadj")
 mmdata <-  read.csv("effadj_binned_5min_UTC.csv")
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0) # if data is lower resolution
 
 # remove tod
 mmdata <- mmdata %>%
@@ -99,9 +100,10 @@ graphics.off()
 
 acf_full  = acf(mmdata$MmPres,3000)
 # acf_res  = acf(residuals(mmGLM),3000)
-# windows()
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
+windows()
+plot(acf_full, xlab = "Lags (Minutes)", ylab = "ACF", main = "", xlim = c(2400, 2700), ylim = c(-0.02, 0.05))
+windows(12,6)
+plot(acf_full, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Narwhal Echolocation Presence")
 
 
 acf_values <- acf_full$acf[-1]  # Exclude lag 0
