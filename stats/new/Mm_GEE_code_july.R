@@ -32,7 +32,7 @@ options(scipen=999)
 #_______________________________________________________________________________
 
 ## Load Data
-setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
+setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
 mmdata <-  read.csv("binned_effort_UTC.csv")
 
 # remove tod
@@ -107,8 +107,6 @@ geepack::QIC(l)[1]
 geepack::QIC(p)[1] 
 
 
-# sPres:bs(minRange) - 172911.9 
-# !!!! sPres:bs(minRange, knots = 1) - 172592.1 
 
 s = geeglm(MmPres ~  sPres:bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
 l = geeglm(MmPres ~  sPres:bs(minRange), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
@@ -122,7 +120,7 @@ geepack::QIC(p)[1]
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             bs(day, df = 3)+# kts changes nothing here, df does
+             bs(day)+# kts changes nothing here, df does
              # bs(maxSPL)+
              bs(Ice_pc)+
              # mSpline(minute,knots=kTd,Boundary.knots=lTd,periodic=T)+
@@ -172,7 +170,7 @@ conf_interval_lower <- -1.96 / sqrt(N)
 first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
 cat("First lag within bounds:", first_lag_within_bounds, "\n")
 cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
-# 3773 ~  2.5 days 
+# 12283 ~  8.5 days 
 
 ### CREATE WAVE + ID
 
@@ -189,8 +187,8 @@ full_df <- left_join(full_df, mmdata, by = "Time")
 mmdata <- full_df %>% 
   mutate(
     MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/1 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 60) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 60
+    wave = ((MinNumber - 1) %% 12283) + 1, # Cycle through
+    ID = ((MinNumber - 1) %/% 12283
           ) + 1 # Increment ID 
   )
 
@@ -212,15 +210,12 @@ rm(full_df)
 gc()
 MmGEE_ind = geeglm(MmPres~
                      bs(day)+# kts changes nothing here, df does
-                     # bs(maxSPL)+
                      bs(Ice_pc)+
-                     # mSpline(minute,knots=kTd,Boundary.knots=lTd,periodic=T)+
                      bs(minRange, knots = 40),
-                   # as.factor(year),
-                   # sPres:bs(minRange, knots = 40),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
-
+QIC(MmGEE_ind)
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
+
 
 # Single term deletions
 # 
@@ -298,16 +293,16 @@ graphics.off()
   predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
   ###### Plots sit
-  otherstuff = c("sPres","minRange", "day")
-  otherstuffvalue <- c(0,50, 15)    
+  otherstuff = c("minRange", "day")
+  otherstuffvalue <- c(50, 15)    
   namethingstoshow= "Ice_pc"
   axisLabel = "Sea Ice Concentration"
   predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   
   ###### Plots m
-  otherstuff = c("sPres","minRange", "Ice_pc")
-  otherstuffvalue <- c(0,50, median(mmdata$Ice_pc))    
+  otherstuff = c("minRange", "Ice_pc")
+  otherstuffvalue <- c(50, median(mmdata$Ice_pc))    
   namethingstoshow= "day"
   axisLabel = "Day of Month"
   predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
