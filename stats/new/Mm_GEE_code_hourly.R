@@ -1,5 +1,4 @@
 
-
 # Using Generalized Estimating Equations (GEEs) to quantify 
 # Narwhal presence in Eclipse Sound
 
@@ -33,13 +32,23 @@ options(scipen=999)
 setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/stage_two/Combine_all/publication/20km_mask/hour")
 mmdata <-  read.csv("hourbinned_40km_UTC.csv")
 
+# remove first trash row
 mmdata = mmdata[-1,]
+
+# now make mmpres binomial
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
 
 # add in the solar elevation
 solar = read.csv("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/code/JPE/Solar/NOAA_Solar_Calculations_day.csv")
-
 mmdata$sun_ele = solar$elevation_atm_accounted
 rm(solar)
+
+
+# select time period (not dec - mar)
+mmdata$Time <- dmy_hms(mmdata$Time)
+mmdata <- mmdata %>%
+  filter(month(Time) >3 & month(Time) < 12)
+
 
 # ------------------------------------------------------------------------------
 # Check correlation and collinearity of variables
@@ -80,58 +89,30 @@ rm(data)
 # ------------------------------------------------------------------------------
 # Define cyclic splines and select if smooth or linear for sonar-related variables based on QIC
 # ------------------------------------------------------------------------------
-mmdata$Time <- dmy_hms(mmdata$Time)
 
 
 # define knots for cyclic splines with 4 degrees of freedom
-msJd = mSpline(mmdata$jd,df = 5, Boundary.knots = c(1,365),periodic = T)
+msJd = mSpline(mmdata$jd,df = 4, Boundary.knots = c(1,365),periodic = T)
 kjd = knots(msJd) 
 lJd = c(1,365)
 
-# now make mmpres binomial
-mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
+# factor year
+mmdata$year = as.factor(mmdata$year)
 
 
-# We test what is best, smooth or linear
-s = geeglm(MmPres ~ Ice_pc,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]
+### CLUSTER SIZE SELECTION
 
-#-------------------------------------------------------------------------------
-# VIF (VIF> 3 collinearity):
-mmGLM<-glm(MmPres ~ 
-             # sun_ele+
-             bs(Ice_pc)+
-             mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T),
-             # as.factor(year),
-           data=mmdata,family=binomial)
-vif1 <- 5000
-threshVIF = 5
-selectedCovariates = attributes(terms (mmGLM))$term.labels
-while (vif1>threshVIF){
-  
-  for (x in 1: length (selectedCovariates)){
-    if (x==1){newformula <- selectedCovariates[1]}else{newformula <- paste (newformula, selectedCovariates[x], sep="+")}
-  }
-  
-  newformula = paste ("MmPres~", newformula,sep="")
-  modeltemp = glm (as.formula (newformula), data=mmdata,family=binomial) 
-  
-  viftemp = vif(modeltemp)
-  print (data.frame(viftemp),digits=2)
-  
-  vif2 = match (max(viftemp[,1]), viftemp[,1])
-  vif1 = viftemp[vif2, 1]
-  if (vif1>threshVIF){   selectedCovariates <- selectedCovariates[-vif2] }
-}
+# acf_res  = acf(residuals(mmGLM),350)
+acf_full = acf(mmdata$MmPres, 500)
+windows()
+plot(acf_full, xlab = "Lags (Hours)", ylab = "ACF", main = "", xlim = c(400, 500), ylim = c(-0.05, 0.12))
+windows(12,6)
+plot(acf_full, xlab = "Lags (Hours)", ylab = "ACF", main = "Autocorrelation of Narwhal Echolocation Presence")
 
-# bs(Ice_pc)                                                    1.3  3             1.1
-# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  1.3  5             1.0
 
-acf_res  = acf(residuals(mmGLM),300)
-
-acf_values <- acf_res$acf[-1]  # Exclude lag 0
-N <- length(residuals(mmGLM))
+# acf_values <- acf_res$acf[-1]  # Exclude lag 0
+acf_values <- acf_full$acf[-1]  # Exclude lag 0
+N <- length(mmdata$MmPres)
 conf_interval_upper <- 1.96 / sqrt(N)
 conf_interval_lower <- -1.96 / sqrt(N)
 first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
@@ -155,14 +136,75 @@ full_df <- left_join(full_df, mmdata, by = "Time")
 mmdata <- full_df %>% 
   mutate(
     hournumber = as.numeric(difftime(Time, min(Time), units = "hours")) + 1, # Calculate the day number from the start
-    wave = ((hournumber - 1) %% 269) + 1, # Cycle through
-    ID = ((hournumber - 1) %/% 269) + 1 # Increment ID 
+    wave = ((hournumber - 1) %% 431) + 1, # Cycle through
+    ID = ((hournumber - 1) %/% 431) + 1 # Increment ID 
   )
 
 mmdata = na.omit(mmdata)
 
 rm(full_df)
 
+
+
+
+### TEST LINEAR / SMOOTH
+
+# We test what is best, smooth or linear
+s = geeglm(MmPres ~  mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+# l = geeglm(MmPres ~ mSpline(jd,df = 4,Boundary.knots=lJd,periodic=T), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+# j = geeglm(MmPres ~ mSpline(jd,df = 6,Boundary.knots=lJd,periodic=T), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+
+s = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+
+geepack::QIC(s)[1]  
+geepack::QIC(l)[1]  
+
+j = geeglm(MmPres ~ sun_ele, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+k = geeglm(MmPres ~ bs(sun_ele), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+
+geepack::QIC(j)[1]  
+geepack::QIC(k)[1]  
+
+#-------------------------------------------------------------------------------
+# VIF (VIF> 3 collinearity):
+mmGLM<-glm(MmPres ~ 
+             bs(Ice_pc)+
+             # mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T)+
+             # as.factor(year)+
+             mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
+           data=mmdata,family=binomial)
+vif1 <- 5000
+threshVIF = 3
+selectedCovariates = attributes(terms (mmGLM))$term.labels
+while (vif1>threshVIF){
+  
+  for (x in 1: length (selectedCovariates)){
+    if (x==1){newformula <- selectedCovariates[1]}else{newformula <- paste (newformula, selectedCovariates[x], sep="+")}
+  }
+  
+  newformula = paste ("MmPres~", newformula,sep="")
+  modeltemp = glm (as.formula (newformula), data=mmdata,family=binomial) 
+  
+  viftemp = vif(modeltemp)
+  print (data.frame(viftemp),digits=2)
+  
+  vif2 = match (max(viftemp[,1]), viftemp[,1])
+  vif1 = viftemp[vif2, 1]
+  if (vif1>threshVIF){   selectedCovariates <- selectedCovariates[-vif2] }
+}
+
+# GVIF Df GVIF..1..2.Df..
+# bs(Ice_pc, degree = 3)                    1.3  3               1
+# as.factor(year)                           1.4  5               1
+# as.factor(season):bs(sun_ele, knots = 1)  1.4  8               1
+
+
+# # bs(Ice_pc)                                                    1.3  3             1.1
+# # mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  1.3  5             1.0
+
+# bs(Ice_pc, knots = 3)                                         1.5  4             1.1
+# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  1.5  5             1.0
 
 
 
@@ -180,41 +222,38 @@ rm(full_df)
 ### IND TEST
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     # sun_ele+
                      bs(Ice_pc)+
-                     mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T),
+                     mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
-# DF   Wald        Pr(>Chi)    
-# bs(Ice_pc)                                                    3 13.256        0.004114 ** 
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 55.534 0.0000000001013 ***
+#                                                               DF Wald       Pr(>Chi)    
+# bs(Ice_pc, df = 4)                                            4 13.3         0.0097 ** 
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 56.3 0.000000000069 ***
 
 QIC(MmGEE_ind)
 # 12256.2822 
 anova(MmGEE_ind)
 
 
+
+
+
 #### AR1 TEST
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     # bs(sun_ele)+
                      bs(Ice_pc)+
-                     mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T),
+                     mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
                    data=mmdata,family=binomial,id=ID,waves=wave,corstr = 'ar1',scale.fix=T) 
+
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
 # DF   Wald         Pr(>Chi)    
 # bs(Ice_pc)                                                    3 12.669         0.005411 ** 
 #   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 57.895 0.00000000003306 ***
+
 QIC(MmGEE_ar1)
 # 12235.8968 
 
 
-# Single term deletions
-# Model:
-#   MmPres ~ bs(Ice_pc) + mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)
-#                                                               DF Wald      Pr(>Chi)    
-# bs(Ice_pc)                                                    3 10.5         0.015 *  
-# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 55.8 0.00000000009 ***
 
 
 
@@ -222,37 +261,55 @@ QIC(MmGEE_ar1)
 
 anova(MmGEE_ar1)
 
-# Analysis of 'Wald statistic' Table
-# Model: binomial, link: logit
-# Response: MmPres
-# Terms added sequentially (first to last)
-# 
-# Df     X2        P(>|Chi|)    
-# bs(Ice_pc)                                                    3 39.446 0.00000001396355 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 57.895 0.00000000003306 ***
-#   ---
-#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+###### RESULT HERE ###########
 
 
-print(summary(MmGEE_ar1),digits=4)
 
 
-# geeglm(formula = MmPres ~ bs(Ice_pc) + mSpline(jd, knots = kjd, 
-#                                                Boundary.knots = lJd, periodic = T), family = binomial, data = mmdata, 
-#        id = ID, waves = wave, corstr = "ar1", scale.fix = T)
+
+
+
+print(summary(mmGEE),digits=4)
+
+library(xtable)
+
+# Summarize the model
+summary_MmGEE <- summary(mmGEE)
+
+# Extract the necessary components
+coefficients <- summary_MmGEE$coefficients
+# Create a nicer data frame for the table (assuming standard columns: Estimate, Std. Error, z value, Pr(>|z|))
+mmgee_results <- data.frame(
+  Variable = rownames(coefficients),
+  Estimate = coefficients[, "Estimate"],
+  `Standard Error` = coefficients[, "Std.err"],
+  `Wald` = coefficients[, "Wald"],
+  `Pr(>|W|)` = coefficients[, "Pr(>|W|)"]
+)
+ 
+ 
+write.csv(mmgee_results, "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HM_Final.csv")
+
+
+
+# Call:
+#   geeglm(formula = MmPres ~ bs(Ice_pc, df = 4, knots = 1) + mSpline(jd, 
+#                                                                     knots = kjd, Boundary.knots = lJd, periodic = T), family = binomial, 
+#          data = mmdata, id = ID, waves = wave, corstr = "ar1", scale.fix = T)
 # 
 # Coefficients:
-#   Estimate    Std.err   Wald  Pr(>|W|)    
-# (Intercept)                                                     -13.3381     4.0937 10.616  0.001121 ** 
-#   bs(Ice_pc)1                                                      -1.9410     1.6088  1.456  0.227623    
-# bs(Ice_pc)2                                                       2.3308     1.2494  3.480  0.062098 .  
-# bs(Ice_pc)3                                                      -2.3288     0.6998 11.074  0.000875 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)1  1254.8739   355.7923 12.440  0.000420 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)2  -139.6599   134.2070  1.083  0.298047    
-# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)3  1512.0774   381.0422 15.747 0.0000724 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)4 -1631.6418   382.8824 18.160 0.0000203 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)5  1229.4706   432.6492  8.075  0.004487 ** 
-#   ---
+#   Estimate    Std.err   Wald       Pr(>|W|)    
+# (Intercept)                                                       0.3129     1.3905  0.051         0.8220    
+# bs(Ice_pc, df = 4, knots = 1)1                                    0.4130     0.4803  0.739         0.3898    
+# bs(Ice_pc, df = 4, knots = 1)2                                   -2.1004     1.7209  1.490         0.2223    
+# bs(Ice_pc, df = 4, knots = 1)3                                    2.8168     1.2318  5.229         0.0222 *  
+#   bs(Ice_pc, df = 4, knots = 1)4                                   -2.2239     0.6961 10.207         0.0014 ** 
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)1   -26.2268    94.1374  0.078         0.7806    
+# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)2  -626.6827    99.8354 39.403 0.000000000345 ***
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)3   740.6442   155.7082 22.625 0.000001968640 ***
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)4 -4194.0005   689.7279 36.974 0.000000001197 ***
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)5  -570.0769   551.7725  1.067         0.3015    
+# ---
 #   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 # 
 # Correlation structure = ar1 
@@ -262,52 +319,42 @@ print(summary(MmGEE_ar1),digits=4)
 # 
 # Estimated Correlation Parameters:
 #   Estimate Std.err
-# alpha   0.6472  0.2879
-# Number of clusters:   145  Maximum cluster size: 269 
+# alpha   0.4081  0.9953
+# Number of clusters:   105  Maximum cluster size: 273 
 
 
 
 
-save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HMar1_hour.Rdata")
+save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HMar1_hour_draft04.Rdata")
 
 
-mmGEE = MmGEE_ar1
+mmGEE = MmGEE_ind
 graphics.off()
 
 {#plot.new()            # Create empty plot in RStudios' default window
-  dev.new(width = 7,height = 8,noRStudioGD = TRUE)   # Create new plot window
+  dev.new(width = 14,height = 6,noRStudioGD = TRUE)   # Create new plot window
   par(mfrow=c(1,2))
 
   
   ###### Plots year
-  otherstuff = c("jd")
-  otherstuffvalue <- c(200)       #FOR JULY
+  otherstuff = c("jd", "sun_ele")
+  otherstuffvalue <- c(190, median(mmdata$sun_ele))       #FOR JULY
   namethingstoshow= "Ice_pc"
   axisLabel = "Percent Ice Cover"
   predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-  otherstuff = c("jd")
-  otherstuffvalue <- c(290)       #FOR OCTOBER
-  namethingstoshow= "Ice_pc"
-  axisLabel = "Percent Ice Cover"
-  predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  otherstuff = c("jd", "Ice_pc")
+  otherstuffvalue <- c(300, 0)       #FOR JULY
+  namethingstoshow= "sun_ele"
+  axisLabel = "Solar Elevation Angle"
+  predgridmaker (mmGEE, mmdata$sun_ele[mmdata$jd < 200], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-  
-  ##### Day of Year
-  otherstuff = c("Ice_pc")
-  otherstuffvalue <- c(0)       ###perhaps better to set jd=183
+  otherstuff = c("sun_ele", "Ice_pc")
+  otherstuffvalue <- c(0, 0)       #FOR JULY
   namethingstoshow= "jd"
-  axisLabel = "Day of Year"
+  axisLabel = "day of year"
   predgridmaker (mmGEE, mmdata$jd, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
-
-  # plots solar elevation angle adjusted for 
-  # 
-  # otherstuff = c("jd","Ice_pc")
-  # otherstuffvalue <- c(190, 0)       #FOR OCTOBER
-  # namethingstoshow= "sun_ele"
-  # axisLabel = "Sun Elevation Angle Adjusted for Refraction (degrees)"
-  # predgridmaker (mmGEE, mmdata$sun_ele, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
-  # 
+  
 }
 
 
