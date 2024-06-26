@@ -33,12 +33,22 @@ setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combi
 mmdata <-  read.csv("effadj_binned_5min_UTC.csv")
 mmdata$MmPres = as.numeric(mmdata$MmPres > 0) # if data is lower resolution
 
+mmdata$Time <- dmy_hms(mmdata$Time)
+
+
+# adding solar data
+solar = read.csv("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/code/JPE/Solar/NOAA_Solar_Calculations_5min.csv")
+solar$Time <- ymd_hms(solar$Time)
+
+mmdata <- merge(solar, mmdata, by = "Time", all = F)
+rm(solar)
+
 # remove tod
 mmdata <- mmdata %>%
   select(-tod)
 
 # Filter for October, make day variable
-mmdata$Time <- dmy_hms(mmdata$Time)
+# mmdata$Time <- dmy_hms(mmdata$Time)
 mmdata <- mmdata %>%
   filter(month(Time) == 7)
 mmdata$day  = day(mmdata$Time)
@@ -75,7 +85,7 @@ mmdata$minRange[mmdata$sPres == 0] = 50
 
 
 # Correlations: Pearson correlation (r>0.6)
-plotCols = c(2,4,5,9,14,16,17) # index of variables to test correlations
+plotCols = c(2,3,5,6,10,15,17,18) # index of variables to test correlations
 covarList = names(mmdata[c(plotCols)])
 data = na.omit(mmdata)
 corData = cor(data[covarList])
@@ -127,15 +137,15 @@ full_df <- left_join(full_df, mmdata, by = "Time")
 mmdata <- full_df %>% 
   mutate(
     MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/5 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 2529) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 2529  
+    wave = ((MinNumber - 1) %% 2522 ) + 1, # Cycle through
+    ID = ((MinNumber - 1) %/% 2522   
     ) + 1 # Increment ID 
   )
 
 mmdata = na.omit(mmdata)
 
 rm(full_df)
-
+rm(data)
 
 
 
@@ -143,41 +153,69 @@ rm(full_df)
 # Define cyclic splines and select if smooth or linear for ship variables based on QIC
 # ------------------------------------------------------------------------------
 
-# define knots for cyclic splines with 4 degrees of freedom
-msTd = mSpline(mmdata$hour,df = 4, Boundary.knots = c(1,1440),periodic = T)
+msTd = mSpline(mmdata$localhour,df = 4, Boundary.knots = c(1,24),periodic = T)
 kTd = knots(msTd) 
-lTd = c(1,1440)
-
-# We test what is best, smooth or linear
-# day
-s = geeglm(MmPres ~  day ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ bs(day), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~ bs(day, df =5), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+lTd = c(1,24)
 
 
-# sPres:bs(minRange) - 172911.9 
-# !!!! sPres:bs(minRange, knots = 1) - 172592.1 
 
-s = geeglm(MmPres ~  sPres:bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~  sPres:bs(minRange), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+# define knots for cyclic splines with 4 degrees of freedom
+p = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(p)[1]  
+geepack::QIC(l)[1] 
 
+r = geeglm(MmPres ~  minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+s = geeglm(MmPres ~  bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(r)[1]  
+geepack::QIC(s)[1]
+#__________________________________________
+x = geeglm(MmPres ~  maxSPL, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(x)[1]  
+rm(x)
+gc()
+
+y = geeglm(MmPres ~  bs(maxSPL) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(y)[1]  
+
+#__________________________
+a = geeglm(MmPres ~  day, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(a)[1]  
+rm(a)
+gc()
+
+
+b = geeglm(MmPres ~  bs(day) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(b)[1]  
+#__________________________
+j = geeglm(MmPres ~  sun_ele, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(j)[1]  
+rm(j)
+gc()
+
+
+k = geeglm(MmPres ~  bs(sun_ele) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+gc()
+geepack::QIC(j)[1] 
+#__________________________
 mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
 
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             # mSpline(hour, knots = kTd, Boundary.knots = lTd, periodic = T) +
+             Ice_pc+
+             minRange+
+             # bs(maxSPL)+
+             mSpline(localhour, knots = kTd, Boundary.knots = lTd, periodic = T) +
              bs(day)+# kts changes nothing here, df does
-             # bs(Ice_pc)+
-             bs(minRange, knots = 40),
-             # as.factor(year),
+             # bs(minRange, knots = 40),
+             as.factor(year),
+           # bs(maxSPL):minRange,
            data=mmdata,family=binomial)
 vif1 <- 5000
 threshVIF = 3
@@ -306,11 +344,10 @@ anova(MmGEE_ind)
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     # mSpline(hour, knots = kTd, Boundary.knots = lTd, periodic = T) +
-                     bs(day)+# kts changes nothing here, df does
-                     # bs(Ice_pc)+
-                     bs(minRange, knots = 40),
-                     # as.factor(year),
+                     Ice_pc+
+                     minRange+
+                     mSpline(localhour, knots = kTd, Boundary.knots = lTd, periodic = T) +
+                     bs(day),# kts changes nothing here, df does
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
@@ -336,16 +373,34 @@ anova(MmGEE_ar1)
 
 
 
-print(summary(MmGEE_ind),digits=4) 
+
+
+# _____________________________
+print(summary(MmGEE_ind),digits=4)
+library(xtable)
+
+# Summarize the model
+summary_MmGEE <- summary(MmGEE_ind)
+
+# Extract the necessary components
+coefficients <- summary_MmGEE$coefficients
+# Create a nicer data frame for the table (assuming standard columns: Estimate, Std. Error, z value, Pr(>|z|))
+mmgee_results <- data.frame(
+  Variable = rownames(coefficients),
+  Estimate = coefficients[, "Estimate"],
+  `Standard Error` = coefficients[, "Std.err"],
+  `Wald` = coefficients[, "Wald"],
+  `Pr(>|W|)` = coefficients[, "Pr(>|W|)"]
+)
+write.csv(mmgee_results, "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM_July_Final.csv")
+# ______________________________
 
 
 
 
 
 
-
-
-save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind_JULY_win1km.Rdata")
+save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind_JULY4_ar1_wooooooo.Rdata")
 
 
 mmGEE = MmGEE_ind
@@ -356,26 +411,28 @@ graphics.off()
   dev.new(width = 14,height = 12,noRStudioGD = TRUE)   # Create new plot window
   par(mfrow=c(2,2))
   
+
+  ###### Plots sit
+  otherstuff = c("minRange", "localhour")
+  otherstuffvalue <- c(50, 12)    
+  namethingstoshow= "day"
+  axisLabel = "Day of Month"
+  predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  
+  ###### Plots hour of day
+  otherstuff = c("minRange", "day")
+  otherstuffvalue <- c(50, 15)    
+  namethingstoshow= "localhour"
+  axisLabel = "Local Hour of Day"
+  predgridmaker (mmGEE, mmdata$localhour, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  
   # Plots RNV
-  otherstuff = c("day")
-  otherstuffvalue <- c(15)       ###perhaps better to set jd=183
+  otherstuff = c("day", "localhour")
+  otherstuffvalue <- c(15, 12)       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
   predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-  ###### Plots sit
-  otherstuff = c("minRange")
-  otherstuffvalue <- c(50)    
-  namethingstoshow= "day"
-  axisLabel = "Day of Month"
-  predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
-  
-  ###### Plots m
-  otherstuff = c("minRange", "Ice_pc")
-  otherstuffvalue <- c(50, median(mmdata$Ice_pc))    
-  namethingstoshow= "day"
-  axisLabel = "Day of Month"
-  predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   ###### Plots year
   otherstuff = c("minRange", "day")
