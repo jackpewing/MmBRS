@@ -103,8 +103,9 @@ graphics.off()
 acf_full  = acf(mmdata$MmPres,3000)
 # acf_res  = acf(residuals(mmGLM),3000)
 # windows()
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
+# plot(acf_full, xlab = "Lags (Minutes)", ylab = "ACF", main = "", xlim = c(1700, 1900), ylim = c(-0.02, 0.05))
+# windows(12,6)
+# plot(acf_full, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation of Narwhal Echolocation Presence")
 
 
 acf_values <- acf_full$acf[-1]  # Exclude lag 0
