@@ -35,8 +35,10 @@ options(scipen=999)
 # setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/all")
 # mmdata <-  read.csv("binned_effort_UTC.csv")
 
-setwd("I:/Projects/BRS_thesis/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/5min_effadj")
+setwd("G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/Arctic_shiptxClicks/output/Stage_two/Combine_all/publication/20km_mask/effort/5min_effadj")
 mmdata <-  read.csv("effadj_binned_5min_UTC.csv")
+
+mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
 
 # remove tod
 mmdata <- mmdata %>%
@@ -114,7 +116,7 @@ conf_interval_lower <- -1.96 / sqrt(N)
 first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
 cat("First lag within bounds:", first_lag_within_bounds, "\n")
 cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
-# 2283 ~ 8 days
+# 2522 days
 
 ### CREATE WAVE + ID
 
@@ -131,16 +133,15 @@ full_df <- left_join(full_df, mmdata, by = "Time")
 mmdata <- full_df %>% 
   mutate(
     MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/5 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 2529) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 2529  
+    wave = ((MinNumber - 1) %% 2522) + 1, # Cycle through
+    ID = ((MinNumber - 1) %/% 2522  
     ) + 1 # Increment ID 
   )
 
 mmdata = na.omit(mmdata)
-
 rm(full_df)
 
-
+rm(data)
 
 
 # ------------------------------------------------------------------------------
@@ -148,40 +149,46 @@ rm(full_df)
 # ------------------------------------------------------------------------------
 
 # define knots for cyclic splines with 4 degrees of freedom
-msTd = mSpline(mmdata$hour,df = 4, Boundary.knots = c(1,1440),periodic = T)
+msTd = mSpline(mmdata$localhour,df = 4, Boundary.knots = c(1,24),periodic = T)
 kTd = knots(msTd) 
-lTd = c(1,1440)
+lTd = c(1,24)
 
 # We test what is best, smooth or linear
 # day
-s = geeglm(MmPres ~  day ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~ bs(day), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~ bs(day, df =5), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+p = geeglm(MmPres ~ Ice_pc, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+l = geeglm(MmPres ~ bs(Ice_pc), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(p)[1]  
+geepack::QIC(l)[1] 
 
+r = geeglm(MmPres ~  minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+s = geeglm(MmPres ~  bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(r)[1]  
+geepack::QIC(s)[1]
 
-# sPres:bs(minRange) - 172911.9 
-# !!!! sPres:bs(minRange, knots = 1) - 172592.1 
+x = geeglm(MmPres ~  maxSPL, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+y = geeglm(MmPres ~  bs(maxSPL) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(x)[1]  
+geepack::QIC(y)[1]  
 
-s = geeglm(MmPres ~  sPres:bs(minRange, knots = 40) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-l = geeglm(MmPres ~  sPres:bs(minRange), data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-p = geeglm(MmPres ~  sPres:minRange, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
-geepack::QIC(s)[1]  
-geepack::QIC(l)[1]  
-geepack::QIC(p)[1] 
+a = geeglm(MmPres ~  day, data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+b = geeglm(MmPres ~  bs(day) ,data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T)
+geepack::QIC(a)[1]  
+geepack::QIC(b)[1]  
+
 
 mmdata$MmPres = as.numeric(mmdata$MmPres > 0)
 
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
-mmGLM<-glm(MmPres ~ 
-             # mSpline(hour, knots = kTd, Boundary.knots = lTd, periodic = T) +
+mmGLM<-glm(MmPres ~
+             Ice_pc+
+             minRange+
+             # bs(maxSPL)+
+             mSpline(localhour, knots = kTd, Boundary.knots = lTd, periodic = T) +
              bs(day)+# kts changes nothing here, df does
-             # bs(Ice_pc)+
-             bs(minRange, knots = 40),
-             # as.factor(year),
+             # bs(minRange, knots = 40),
+             as.factor(year),
+             # bs(maxSPL):minRange,
            data=mmdata,family=binomial)
 vif1 <- 5000
 threshVIF = 3
@@ -209,47 +216,6 @@ while (vif1>threshVIF){
 # mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  1.0  4             1.0
 # sPres:bs(minRange, knots = 1)                                  1.1  4             1.0
 
-acf_res  = acf(residuals(mmGLM),3000)
-# windows()
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output", xlim = c(12000, 12500), ylim = c(-0.02, 0.05))
-# plot(acf_res, xlab = "Lags (Minutes)", ylab = "ACF", main = "Autocorrelation Series Residuals of GLM Output")
-
-
-acf_values <- acf_res$acf[-1]  # Exclude lag 0
-N <- length(residuals(mmGLM))
-conf_interval_upper <- 1.96 / sqrt(N)
-# conf_interval_upper <- 0.1 # how morgan did it !
-conf_interval_lower <- -1.96 / sqrt(N)
-# conf_interval_lower <- -0.1 # How Morgan did it
-
-first_lag_within_bounds <- which(acf_values <= conf_interval_upper & acf_values >= conf_interval_lower)[1]
-cat("First lag within bounds:", first_lag_within_bounds, "\n")
-cat("Autocorrelation value at this lag:", acf_values[first_lag_within_bounds], "\n")
-# 2283 ~ 8 days
-
-### CREATE WAVE + ID
-
-# Assuming df is your original dataframe with a datetime column 'Time'
-mmdata$Time <- as.POSIXct(mmdata$Time, format = "%Y-%m-%d %H:%M:%S")
-# Create a full sequence of minutes
-full_minutes <- seq(min(mmdata$Time), max(mmdata$Time), by = "5 min")
-# Create a new dataframe from the sequence
-full_df <- data.frame(Time = full_minutes)
-# Merge the full minute range with the original data (this will fill missing minutes with NA for other columns)
-# Ensure 'df' is not missing any columns for the merge to work correctly
-full_df <- left_join(full_df, mmdata, by = "Time")
-# Generate the wave and ID variables based on minutes
-mmdata <- full_df %>% 
-  mutate(
-    MinNumber = as.numeric(difftime(Time, min(Time), units = "mins"))/5 + 1, # Calculate the day number from the start
-    wave = ((MinNumber - 1) %% 2545) + 1, # Cycle through
-    ID = ((MinNumber - 1) %/% 2545 
-          ) + 1 # Increment ID 
-  )
-
-mmdata = na.omit(mmdata)
-
-rm(full_df)
 
 
 
@@ -264,11 +230,15 @@ rm(full_df)
 # ------------------------------------------------------------------------------
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     # mSpline(hour, knots = kTd, Boundary.knots = lTd, periodic = T) +
-                     bs(day)+# kts changes nothing here, df does
+                     Ice_pc+
+                     minRange+
+                     # bs(maxSPL)+
+                     mSpline(localhour, knots = kTd, Boundary.knots = lTd, periodic = T) +
+                     bs(day),# kts changes nothing here, df does
                      # bs(Ice_pc)+
-                     bs(minRange, knots = 40),
-                     # as.factor(year),
+                     # bs(minRange, knots = 40),
+                     # as.factor(year)+
+                     # bs(maxSPL):minRange,
                    data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
@@ -282,7 +252,7 @@ D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
 # bs(sit)                                                        3  8.91  0.03058 *  
 #   mSpline(tod, knots = kTd, Boundary.knots = lTd, periodic = T)  4 11.88  0.01827 *  
 #   as.factor(year)                                                4 18.00  0.00124 ** 
-#   sPres:bs(minRange)                                             3 17.17  0.00065 ***
+#   sPres:bs(minRange)                                             3 17.17  0.00065 ***sy
 
 QIC(MmGEE_ind)
 
@@ -310,11 +280,15 @@ anova(MmGEE_ind)
 
 gc()
 MmGEE_ar1 = geeglm(MmPres~
-                     # mSpline(hour, knots = kTd, Boundary.knots = lTd, periodic = T) +
-                     bs(day)+# kts changes nothing here, df does
-                     # bs(Ice_pc)+
-                     bs(minRange, knots = 40),
-                     # as.factor(year),
+                     Ice_pc+
+                     minRange+
+                     # bs(maxSPL)+
+                     mSpline(localhour, knots = kTd, Boundary.knots = lTd, periodic = T) +
+                     bs(day),# kts changes nothing here, df does
+                   # bs(Ice_pc)+
+                   # bs(minRange, knots = 40),
+                   # as.factor(year)+
+                   # bs(maxSPL):minRange,
                    data=mmdata,family=binomial,id=ID,waves=wave, corstr ="ar1", scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
@@ -349,7 +323,7 @@ print(summary(MmGEE_ind),digits=4)
 
 
 
-save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM3range_ind_JULY_win1km.Rdata")
+save(list = c("MmGEE_ind", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/impact/IM_lastryJULY_idkwhich_ind.Rdata")
 
 
 mmGEE = MmGEE_ind
@@ -361,32 +335,39 @@ graphics.off()
   par(mfrow=c(2,2))
   
   # Plots RNV
-  otherstuff = c("day")
-  otherstuffvalue <- c(15)       ###perhaps better to set jd=183
+  otherstuff = c("day", "localhour", "Ice_pc")
+  otherstuffvalue <- c(15,12,0)       ###perhaps better to set jd=183
   namethingstoshow= "minRange"
   axisLabel = "Range to Nearest Vessel (km)"
   predgridmaker (mmGEE, mmdata$minRange[mmdata$sPres == 1], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
+  #plots maxSPL
+  otherstuff = c("day", "localhour", "minRange")
+  otherstuffvalue <- c(15,12, 50)       ###perhaps better to set jd=183
+  namethingstoshow= "Ice_pc"
+  axisLabel = "max Sound Pressure level"
+  predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  
   ###### Plots sit
-  otherstuff = c("minRange")
-  otherstuffvalue <- c(50)    
+  otherstuff = c("minRange","hour","Ice_pc")
+  otherstuffvalue <- c(50,12,0)    
   namethingstoshow= "day"
   axisLabel = "Day of Month"
   predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   ###### Plots m
-  otherstuff = c("minRange", "Ice_pc")
-  otherstuffvalue <- c(50, median(mmdata$Ice_pc))    
-  namethingstoshow= "day"
-  axisLabel = "Day of Month"
-  predgridmaker (mmGEE, mmdata$day, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
+  otherstuff = c("minRange", "Ice_pc","day")
+  otherstuffvalue <- c(50, median(mmdata$Ice_pc),15)    
+  namethingstoshow= "hour"
+  axisLabel = "hour"
+  predgridmaker (mmGEE, mmdata$hour, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin=NA)
   
   ###### Plots year
-  otherstuff = c("minRange", "day")
-  otherstuffvalue <- c(50,15)       ###perhaps better to set jd=183
-  namethingstoshow= "year"
-  axisLabel = "Year"
-  predgridmaker (mmGEE, as.factor(mmdata$year), namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  otherstuff = c("minRange", "day", "hour")
+  otherstuffvalue <- c(50,15,12)       ###perhaps better to set jd=183
+  namethingstoshow= "Ice_pc"
+  axisLabel = "Sea Ice Concentration"
+  predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
 
   ###### Plots timeofd
   otherstuff = c("sPres","minRange", "sit", "day")
