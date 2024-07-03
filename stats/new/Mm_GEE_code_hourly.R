@@ -169,9 +169,10 @@ geepack::QIC(k)[1]
 #-------------------------------------------------------------------------------
 # VIF (VIF> 3 collinearity):
 mmGLM<-glm(MmPres ~ 
-             bs(Ice_pc)+
+             # bs(Ice_pc)+
              # mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T)+
-             # as.factor(year)+
+             # bs(sun_ele)+
+             as.factor(year)+
              mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
            data=mmdata,family=binomial)
 vif1 <- 5000
@@ -222,16 +223,19 @@ while (vif1>threshVIF){
 ### IND TEST
 gc()
 MmGEE_ind = geeglm(MmPres~
-                     bs(Ice_pc)+
+                     # bs(Ice_pc)+
+                     # mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T)+
+                     # bs(sun_ele)+
+                     # as.factor(year)+
                      mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
-                   data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
+            data=mmdata,family=binomial,id=ID,waves=wave,scale.fix=T) 
 D1 = drop1(MmGEE_ind,test = "Wald",method = "robust")
-#                                                               DF Wald       Pr(>Chi)    
-# bs(Ice_pc, df = 4)                                            4 13.3         0.0097 ** 
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 56.3 0.000000000069 ***
+# bs(Ice_pc)                                                    3 79.038 < 0.00000000000000022 ***
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  4 23.735            0.00009026 ***
 
 QIC(MmGEE_ind)
-# 12256.2822 
+# QIC       QICu  Quasi Lik        CIC     params       QICC 
+# 12251.9699 12223.0096 -6103.5048    22.4802     8.0000 12254.4106 
 anova(MmGEE_ind)
 
 
@@ -242,8 +246,11 @@ anova(MmGEE_ind)
 gc()
 MmGEE_ar1 = geeglm(MmPres~
                      bs(Ice_pc)+
-                     mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
-                   data=mmdata,family=binomial,id=ID,waves=wave,corstr = 'ar1',scale.fix=T) 
+                     # mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T)+
+                     bs(sun_ele),
+                     # as.factor(year)+
+                     # mSpline(jd,knots=kjd,Boundary.knots=lJd,periodic=T):bs(sun_ele),
+            data=mmdata,family=binomial,id=ID,waves=wave,corstr = 'ar1',scale.fix=T) 
 
 D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
 # DF   Wald         Pr(>Chi)    
@@ -251,22 +258,20 @@ D2 = drop1(MmGEE_ar1,test = "Wald",method = "robust")
 #   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  5 57.895 0.00000000003306 ***
 
 QIC(MmGEE_ar1)
-# 12235.8968 
-
-
-
-
-
-
+# QIC        QICu   Quasi Lik         CIC      params        QICC 
+# 12251.63519 12223.56095 -6103.78048    22.03712     8.00000 12254.73864 
 
 anova(MmGEE_ar1)
+# bs(Ice_pc)                                                    3 155.201 < 0.00000000000000022 ***
+#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)  4  23.666            0.00009318 ***
+
+
+
+
+
+
 
 ###### RESULT HERE ###########
-
-
-
-
-
 
 
 print(summary(mmGEE),digits=4)
@@ -288,73 +293,63 @@ mmgee_results <- data.frame(
 )
  
  
-write.csv(mmgee_results, "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HM_Final.csv")
-
-
-
-# Call:
-#   geeglm(formula = MmPres ~ bs(Ice_pc, df = 4, knots = 1) + mSpline(jd, 
-#                                                                     knots = kjd, Boundary.knots = lJd, periodic = T), family = binomial, 
-#          data = mmdata, id = ID, waves = wave, corstr = "ar1", scale.fix = T)
-# 
-# Coefficients:
-#   Estimate    Std.err   Wald       Pr(>|W|)    
-# (Intercept)                                                       0.3129     1.3905  0.051         0.8220    
-# bs(Ice_pc, df = 4, knots = 1)1                                    0.4130     0.4803  0.739         0.3898    
-# bs(Ice_pc, df = 4, knots = 1)2                                   -2.1004     1.7209  1.490         0.2223    
-# bs(Ice_pc, df = 4, knots = 1)3                                    2.8168     1.2318  5.229         0.0222 *  
-#   bs(Ice_pc, df = 4, knots = 1)4                                   -2.2239     0.6961 10.207         0.0014 ** 
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)1   -26.2268    94.1374  0.078         0.7806    
-# mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)2  -626.6827    99.8354 39.403 0.000000000345 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)3   740.6442   155.7082 22.625 0.000001968640 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)4 -4194.0005   689.7279 36.974 0.000000001197 ***
-#   mSpline(jd, knots = kjd, Boundary.knots = lJd, periodic = T)5  -570.0769   551.7725  1.067         0.3015    
-# ---
-#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Correlation structure = ar1 
-# Scale is fixed.
-# 
-# Link = identity 
-# 
-# Estimated Correlation Parameters:
-#   Estimate Std.err
-# alpha   0.4081  0.9953
-# Number of clusters:   105  Maximum cluster size: 273 
+write.csv(mmgee_results, "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HM_sunday_20240627.csv", row.names = F)
 
 
 
 
-save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HMar1_hour_draft04.Rdata")
 
 
-mmGEE = MmGEE_ind
+
+save(list = c("MmGEE_ar1", "mmdata"), file = "G:/Shared drives/SWAL_Arctic/Research_projects/JackBRS/publication/stats/output/habitat/HM_sunday_20240627.Rdata")
+
+
+mmGEE = MmGEE_ar1
 graphics.off()
 
 {#plot.new()            # Create empty plot in RStudios' default window
-  dev.new(width = 14,height = 6,noRStudioGD = TRUE)   # Create new plot window
-  par(mfrow=c(1,2))
-
+  dev.new(width = 12,height = 12,noRStudioGD = TRUE)   # Create new plot window
+  par(mfrow=c(1,3))
   
-  ###### Plots year
-  otherstuff = c("jd", "sun_ele")
-  otherstuffvalue <- c(190, median(mmdata$sun_ele))       #FOR JULY
-  namethingstoshow= "Ice_pc"
-  axisLabel = "Percent Ice Cover"
-  predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
-  
-  otherstuff = c("jd", "Ice_pc")
-  otherstuffvalue <- c(300, 0)       #FOR JULY
+  otherstuff = c("jd")
+  otherstuffvalue <- c(180)      
   namethingstoshow= "sun_ele"
   axisLabel = "Solar Elevation Angle"
-  predgridmaker (mmGEE, mmdata$sun_ele[mmdata$jd < 200], namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  predgridmaker (mmGEE, mmdata$sun_ele, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-  otherstuff = c("sun_ele", "Ice_pc")
-  otherstuffvalue <- c(0, 0)       #FOR JULY
+  
+  otherstuff = c("sun_ele")
+  otherstuffvalue <- c(0)
   namethingstoshow= "jd"
-  axisLabel = "day of year"
+  axisLabel = "Day of Year"
   predgridmaker (mmGEE, mmdata$jd, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  # 
+
+  otherstuff = c("jd")
+  otherstuffvalue <- c(300)      
+  namethingstoshow= "sun_ele"
+  axisLabel = "Solar Elevation Angle"
+  predgridmaker (mmGEE, mmdata$sun_ele, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
   
-}
+  # otherstuff = c("sun_ele")
+  # otherstuffvalue <- c(0)       
+  # namethingstoshow= "Ice_pc"
+  # axisLabel = "Percent Ice Cover"
+  # predgridmaker (mmGEE, mmdata$Ice_pc, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  # 
+  # otherstuff = c("sun_ele")
+  # otherstuffvalue <- c(0)
+  # namethingstoshow= "jd"
+  # axisLabel = "Day of Year"
+  # predgridmaker (mmGEE, mmdata$jd, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+  # # 
+  # otherstuff = c("year")
+  # otherstuffvalue <- c(180)       
+  # namethingstoshow= "year"
+  # axisLabel = "Year"
+  # predgridmaker (mmGEE, mmdata$year, namethingstoshow, otherstuff, otherstuffvalue,axisLabel, maxy=NA, maxviolin = NA)
+
+  
+  }
 
 
